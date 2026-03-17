@@ -1,0 +1,44 @@
+name: Manual Electron Release Builds
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: windows-nvidia
+            runs-on: windows-latest
+          - variant: macos-apple-silicon
+            runs-on: macos-14
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        working-directory: electron
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Electron variant
+        run: npm run dist:${{ matrix.variant }}
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-factory-${{ matrix.variant }}
+          path: electron/dist/${{ matrix.variant }}
+          if-no-files-found: error

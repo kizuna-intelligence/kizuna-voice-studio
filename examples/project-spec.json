@@ -1,0 +1,19 @@
+{
+  "project_name": "Newsroom Demo",
+  "project_id": "newsroom-demo",
+  "speaker_name": "newsroom_voice",
+  "style_instruction": "20代後半の女性。落ち着いた、聞き取りやすいニュースキャスター風の声で話してください。",
+  "seed_text": "こんにちは。こちらは音声デザインの確認用サンプルです。落ち着いた口調で、明瞭に読み上げます。",
+  "gpu_memory_gb": 16,
+  "language": "Japanese",
+  "qwen_model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+  "mio_model_label": "MioTTS-2-1.6B",
+  "mio_reference_preset_id": null,
+  "prompt_categories": [
+    "emotional",
+    "neutral",
+    "news",
+    "academic"
+  ],
+  "items_per_category": 6
+}

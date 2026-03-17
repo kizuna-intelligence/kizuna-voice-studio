@@ -1,0 +1,10 @@
+workspace/
+GPT_SoVITS/
+node_modules/
+dist/
+vendor/
+.venv/
+.cocoindex_code/
+*.pyc
+__pycache__/
+*.egg-info/

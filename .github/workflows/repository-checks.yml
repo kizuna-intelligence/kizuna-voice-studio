@@ -1,0 +1,65 @@
+name: Repository Checks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "electron/**"
+      - "src/**"
+      - "examples/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".github/workflows/repository-checks.yml"
+  pull_request:
+    paths:
+      - "electron/**"
+      - "src/**"
+      - "examples/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".github/workflows/repository-checks.yml"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Check Electron scripts
+        working-directory: electron
+        run: |
+          node --check backend-bootstrap.js
+          node --check build-variant.js
+          node --check main.js
+          node --check renderer.js
+          node --check variant-manifest.js
+
+      - name: Check Python modules
+        run: |
+          python -m py_compile \
+            src/voice_factory/cli.py \
+            src/voice_factory/exporter.py \
+            src/voice_factory/gradio_app.py \
+            src/voice_factory/models.py \
+            src/voice_factory/server.py \
+            src/voice_factory/service.py \
+            src/voice_factory/translator.py
