@@ -23,6 +23,56 @@
 - `Windows / Linux` で NVIDIA GPU がある人: `windows-nvidia` または `linux-nvidia`
 - `macOS` で Apple Silicon の人: `macos-apple-silicon`
 
+## ダウンロードと起動
+
+最新版の配布ファイルは、GitHub の Releases からダウンロードします。
+
+- Releases: https://github.com/kizuna-intelligence/kizuna-voice-studio/releases
+
+ファイル名の目安は次のとおりです。
+
+- `Windows`: `VoiceFactory-Windows-NVIDIA-<version>.exe`
+- `Linux`: `VoiceFactory-Linux-NVIDIA-<version>.AppImage`
+- `macOS`: `VoiceFactory-macOS-Apple-Silicon-<version>.dmg` または `.zip`
+
+### Windows
+
+1. Releases ページから `VoiceFactory-Windows-NVIDIA-<version>.exe` をダウンロードします
+2. ダウンロードした `.exe` をダブルクリックします
+3. インストーラーが出たら、そのまま進めます
+4. インストール後、スタートメニューまたはデスクトップから `Kizuna Voice Studio` を起動します
+
+### Linux
+
+1. Releases ページから `VoiceFactory-Linux-NVIDIA-<version>.AppImage` をダウンロードします
+2. 実行権限を付けます
+
+```bash
+chmod +x VoiceFactory-Linux-NVIDIA-<version>.AppImage
+```
+
+3. そのまま起動します
+
+```bash
+./VoiceFactory-Linux-NVIDIA-<version>.AppImage
+```
+
+### macOS
+
+1. Releases ページから `VoiceFactory-macOS-Apple-Silicon-<version>.dmg` または `.zip` をダウンロードします
+2. `Applications` にドラッグするか、展開したアプリを配置します
+3. `Kizuna Voice Studio` を起動します
+
+### 最初の起動で起こること
+
+最初の起動では、アプリが自動で次の準備をします。
+
+- Python 実行環境のセットアップ
+- backend 依存ライブラリのインストール
+- 必要なモデルのダウンロード
+
+そのため、初回だけは少し待ち時間があります。
+
 ## できること
 
 - 日本語の説明から種音声を作る
