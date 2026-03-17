@@ -438,6 +438,34 @@ button:disabled {
   color: var(--muted);
 }
 
+.sample-preview-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sample-preview-card {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.sample-preview-card h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.sample-preview-card p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sample-preview-card audio {
+  padding: 8px 10px;
+}
+
 .details-panel {
   position: fixed;
   right: 18px;

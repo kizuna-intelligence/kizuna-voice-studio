@@ -154,6 +154,7 @@ voice.synthesize_to_file("こんにちは", "sample.wav")
 
 この zip は `pip install` すると、参照音声つきの voice module として使えます。
 学習済みモデルそのものを同封するのではなく、`MioTTS` の zero-shot API に参照音声を渡して音声生成します。
+アプリ上では、ダウンロード前にこの package と同じ経路で 3 本の試聴音声を生成して確認できます。
 
 ```bash
 pip install miotts-reference-voice.zip

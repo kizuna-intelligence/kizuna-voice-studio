@@ -79,6 +79,11 @@ class VoiceFactoryService:
         " 聞き手に伝わりやすいように、抑揚を保ちながら丁寧に話します。",
         " 全体の流れが見えやすいように、要点を整理して伝えます。",
     ]
+    _MIOTTS_PREVIEW_TEXTS: list[tuple[str, str]] = [
+        ("sample_01", "こんにちは。今日は種音声をそのまま使う、MioTTS パッケージの試聴です。"),
+        ("sample_02", "この音声は、学習をせずに参照音声だけを同封したパッケージから生成しています。"),
+        ("sample_03", "落ち着いた読み上げや、アプリへの組み込み前の確認に使えるサンプルです。"),
+    ]
 
     def __init__(self, *, workspace_root: Path | None = None) -> None:
         self.workspace_root = workspace_root or WORKSPACE_ROOT
@@ -435,6 +440,9 @@ class VoiceFactoryService:
     def _miotts_package_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).distribution_dir / "miotts-package.json"
 
+    def _miotts_package_preview_manifest_path(self, project_id: str) -> Path:
+        return self.get_project_paths(project_id).distribution_dir / "miotts-package-preview.json"
+
     def plan_project(self, spec: VoiceProjectSpec) -> dict[str, Any]:
         paths = self.get_project_paths(spec.project_id)
         for directory in (
@@ -781,6 +789,12 @@ class VoiceFactoryService:
             return None
         return json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    def get_miotts_package_preview_manifest(self, project_id: str) -> dict[str, Any] | None:
+        manifest_path = self._miotts_package_preview_manifest_path(project_id)
+        if not manifest_path.exists():
+            return None
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
     def get_preview_audio_path(self, project_id: str) -> Path:
         return self._preview_audio_path(project_id)
 
@@ -790,6 +804,7 @@ class VoiceFactoryService:
         package_manifest = self.get_package_manifest(project_id)
         sbv2_package_manifest = self.get_sbv2_package_manifest(project_id)
         miotts_package_manifest = self.get_miotts_package_manifest(project_id)
+        miotts_package_preview_manifest = self.get_miotts_package_preview_manifest(project_id)
         dataset_manifest_path = self._dataset_manifest_path(project_id)
         item_count = None
         if dataset_manifest_path.exists():
@@ -815,6 +830,10 @@ class VoiceFactoryService:
             "miotts_package": {
                 "ready": miotts_package_manifest is not None,
                 "manifest": miotts_package_manifest,
+            },
+            "miotts_package_preview": {
+                "ready": miotts_package_preview_manifest is not None,
+                "manifest": miotts_package_preview_manifest,
             },
             "jobs": self.list_jobs(project_id=project_id)[:10],
         }
@@ -2191,6 +2210,62 @@ class VoiceFactoryService:
             encoding="utf-8",
         )
         return manifest
+
+    def build_miotts_package_previews(
+        self,
+        project_id: str,
+        *,
+        texts: list[str] | None = None,
+    ) -> dict[str, Any]:
+        manifest = self.get_miotts_package_manifest(project_id)
+        if manifest is None:
+            raise FileNotFoundError("MioTTS package is not ready. Build it first.")
+
+        package_dir = Path(manifest["package_dir"])
+        module_name = manifest["module_name"]
+        src_root = package_dir / "src"
+        if not (src_root / module_name / "__init__.py").exists():
+            raise FileNotFoundError(f"MioTTS package module not found: {src_root / module_name}")
+
+        sys.path.insert(0, str(src_root))
+        try:
+            package = __import__(module_name, fromlist=["load_voice"])
+            voice = package.load_voice(
+                api_base_url=manifest["mio_base_url"],
+                model_id=manifest["mio_model_id"],
+            )
+        finally:
+            if sys.path and sys.path[0] == str(src_root):
+                sys.path.pop(0)
+        preview_dir = Path(manifest["package_dir"]) / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+
+        text_items = texts or [item[1] for item in self._MIOTTS_PREVIEW_TEXTS]
+        default_ids = [item[0] for item in self._MIOTTS_PREVIEW_TEXTS]
+        samples: list[dict[str, str]] = []
+        for index, text in enumerate(text_items):
+            sample_id = default_ids[index] if index < len(default_ids) else f"sample_{index + 1:02d}"
+            output_path = preview_dir / f"{sample_id}.wav"
+            voice.save_wav(text, output_path)
+            samples.append(
+                {
+                    "id": sample_id,
+                    "text": text,
+                    "audio_path": str(output_path),
+                }
+            )
+
+        preview_manifest = {
+            "project_id": project_id,
+            "package_name": manifest["package_name"],
+            "module_name": module_name,
+            "samples": samples,
+        }
+        self._miotts_package_preview_manifest_path(project_id).write_text(
+            json.dumps(preview_manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return preview_manifest
 
     def build_installable_sbv2_package(
         self,

@@ -77,6 +77,10 @@ class BuildMioTtsPackageRequest(BaseModel):
     model_id: str | None = None
 
 
+class BuildMioTtsPackagePreviewRequest(BaseModel):
+    texts: list[str] | None = None
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "projects": service.list_projects()}
@@ -214,6 +218,28 @@ def download_miotts_package(project_id: str) -> FileResponse:
     return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
 
 
+@app.get("/v1/projects/{project_id}/package/miotts/preview")
+def get_miotts_package_preview(project_id: str) -> dict:
+    payload = service.get_miotts_package_preview_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="MioTTS package preview is not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/miotts/preview/{sample_id}/audio")
+def get_miotts_package_preview_audio(project_id: str, sample_id: str) -> FileResponse:
+    manifest = service.get_miotts_package_preview_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="MioTTS package preview is not ready")
+    sample = next((item for item in manifest["samples"] if item["id"] == sample_id), None)
+    if sample is None:
+        raise HTTPException(status_code=404, detail="MioTTS preview sample not found")
+    audio_path = Path(sample["audio_path"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="MioTTS preview audio not found")
+    return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
+
+
 @app.post("/v1/projects/{project_id}/dataset")
 def build_dataset(project_id: str, payload: BuildDatasetRequest) -> dict:
     return service.build_dataset(
@@ -285,6 +311,14 @@ def build_miotts_package(project_id: str, payload: BuildMioTtsPackageRequest) ->
         project_id,
         mio_base_url=payload.mio_base_url,
         model_id=payload.model_id,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/miotts/preview")
+def build_miotts_package_preview(project_id: str, payload: BuildMioTtsPackagePreviewRequest) -> dict:
+    return service.build_miotts_package_previews(
+        project_id,
+        texts=payload.texts,
     )
 
 

@@ -17,7 +17,9 @@ const progressFill = document.getElementById("progressFill");
 const previewButton = document.getElementById("previewButton");
 const miottsPanel = document.getElementById("miottsPanel");
 const buildMiottsPackageButton = document.getElementById("buildMiottsPackageButton");
+const previewMiottsPackageButton = document.getElementById("previewMiottsPackageButton");
 const downloadMiottsPackageButton = document.getElementById("downloadMiottsPackageButton");
+const miottsPreviewList = document.getElementById("miottsPreviewList");
 const buildTtsButton = document.getElementById("buildTtsButton");
 const downloadButton = document.getElementById("downloadButton");
 const helpButton = document.getElementById("helpButton");
@@ -392,18 +394,24 @@ function formatJobStatus(payload) {
 function setButtonsState({
   previewBusy = false,
   miottsBusy = false,
+  miottsPreviewBusy = false,
   buildBusy = false,
   previewEnabled = true,
   miottsEnabled = false,
+  miottsPreviewEnabled = false,
   buildEnabled = false,
 } = {}) {
   previewButton.disabled = previewBusy || !previewEnabled;
   buildMiottsPackageButton.disabled = miottsBusy || !miottsEnabled;
+  previewMiottsPackageButton.disabled = miottsPreviewBusy || !miottsPreviewEnabled;
   buildTtsButton.disabled = buildBusy || !buildEnabled;
   previewButton.textContent = previewBusy ? "種音声を生成中..." : "1. 種音声を作成";
   buildMiottsPackageButton.textContent = miottsBusy
     ? "MioTTS パッケージを作成中..."
     : "学習なしの MioTTS パッケージを作る";
+  previewMiottsPackageButton.textContent = miottsPreviewBusy
+    ? "試聴音声を生成中..."
+    : "このパッケージで3つ試聴する";
   buildTtsButton.textContent = buildBusy ? "TTS を作成中..." : "2. この声で TTS を作る";
 }
 
@@ -512,6 +520,41 @@ function setMiottsDownloadReady(projectId, manifest) {
   downloadMiottsPackageButton.classList.remove("hidden");
 }
 
+function clearMiottsSamplePreviews() {
+  miottsPreviewList.innerHTML = "";
+  miottsPreviewList.classList.add("hidden");
+}
+
+function setMiottsSamplePreviews(projectId, manifest) {
+  if (!manifest?.samples?.length) {
+    clearMiottsSamplePreviews();
+    return;
+  }
+
+  miottsPreviewList.innerHTML = "";
+  manifest.samples.forEach((sample, index) => {
+    const card = document.createElement("article");
+    card.className = "sample-preview-card";
+
+    const title = document.createElement("h3");
+    title.textContent = `試聴 ${index + 1}`;
+    card.appendChild(title);
+
+    const text = document.createElement("p");
+    text.textContent = sample.text;
+    card.appendChild(text);
+
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.preload = "none";
+    audio.src = `${apiUrl(`/v1/projects/${encodeURIComponent(projectId)}/package/miotts/preview/${encodeURIComponent(sample.id)}/audio`)}?t=${Date.now()}`;
+    card.appendChild(audio);
+
+    miottsPreviewList.appendChild(card);
+  });
+  miottsPreviewList.classList.remove("hidden");
+}
+
 function openHelpOverlay() {
   helpOverlay.classList.remove("hidden");
 }
@@ -534,6 +577,7 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
       setButtonsState({
         previewEnabled: true,
         miottsEnabled: true,
+        miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
         buildEnabled: true,
       });
       setMiottsPanelEnabled(true);
@@ -545,6 +589,7 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
     activeModelFamily === "sbv2" ? payload.sbv2_package?.manifest : payload.package?.manifest;
   setDownloadReady(projectId, activePackage, activeModelFamily);
   setMiottsDownloadReady(projectId, payload.miotts_package?.manifest);
+  setMiottsSamplePreviews(projectId, payload.miotts_package_preview?.manifest);
 
   if ((activeModelFamily === "piper" && payload.package?.ready) || (activeModelFamily === "sbv2" && payload.sbv2_package?.ready)) {
     previewReady = true;
@@ -554,11 +599,12 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
       training: "done",
       package: "done",
     });
-    setButtonsState({
-      previewEnabled: true,
-      miottsEnabled: true,
-      buildEnabled: true,
-    });
+      setButtonsState({
+        previewEnabled: true,
+        miottsEnabled: true,
+        miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+        buildEnabled: true,
+      });
     setMiottsPanelEnabled(true);
     setModelSelectionEnabled(true);
   }
@@ -593,6 +639,7 @@ async function pollJob(jobId, projectId, { mode }) {
         setButtonsState({
           previewEnabled: true,
           miottsEnabled: true,
+          miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
@@ -609,6 +656,7 @@ async function pollJob(jobId, projectId, { mode }) {
         setButtonsState({
           previewEnabled: true,
           miottsEnabled: true,
+          miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
@@ -670,12 +718,14 @@ previewButton.addEventListener("click", async () => {
       previewBusy: true,
       previewEnabled: true,
       miottsEnabled: false,
+      miottsPreviewEnabled: false,
       buildEnabled: false,
     });
     clearPreview();
     projectIdInput.value = "";
     setDownloadReady("", null, selectedModelFamily());
     setMiottsDownloadReady("", null);
+    clearMiottsSamplePreviews();
     setInitialStageBoard();
     setMiottsPanelEnabled(false);
     setModelSelectionEnabled(false);
@@ -706,6 +756,7 @@ previewButton.addEventListener("click", async () => {
     setButtonsState({
       previewEnabled: true,
       miottsEnabled: previewReady,
+      miottsPreviewEnabled: false,
       buildEnabled: previewReady,
     });
   }
@@ -723,9 +774,11 @@ buildMiottsPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsBusy: true,
       miottsEnabled: true,
+      miottsPreviewEnabled: false,
       buildEnabled: previewReady,
     });
     setMiottsDownloadReady("", null);
+    clearMiottsSamplePreviews();
     setStatus("種音声を同封した MioTTS パッケージを作成しています。");
     const payload = await request(`/v1/projects/${encodeURIComponent(projectId)}/package/miotts`, {
       method: "POST",
@@ -743,6 +796,44 @@ buildMiottsPackageButton.addEventListener("click", async () => {
     setButtonsState({
       previewEnabled: true,
       miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+  }
+});
+
+previewMiottsPackageButton.addEventListener("click", async () => {
+  const projectId = projectIdInput.value;
+  if (!projectId) {
+    setStatus("先に種音声を作成して、声サンプルを確認してください。");
+    return;
+  }
+
+  try {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: true,
+      miottsPreviewBusy: true,
+      miottsPreviewEnabled: true,
+      buildEnabled: previewReady,
+    });
+    clearMiottsSamplePreviews();
+    setStatus("MioTTS パッケージと同じ経路で、試聴音声を3つ生成しています。");
+    const payload = await request(`/v1/projects/${encodeURIComponent(projectId)}/package/miotts/preview`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setOutput(payload);
+    setMiottsSamplePreviews(projectId, payload);
+    setStatus("MioTTS パッケージの試聴音声を3つ用意しました。");
+  } catch (error) {
+    setStatus("MioTTS パッケージの試聴生成に失敗しました。詳細ログを確認してください。");
+    setOutput({ error: String(error) });
+  } finally {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
   }
@@ -759,6 +850,8 @@ buildTtsButton.addEventListener("click", async () => {
   try {
     setButtonsState({
       previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: previewReady,
       buildBusy: true,
       buildEnabled: true,
     });
@@ -783,6 +876,8 @@ buildTtsButton.addEventListener("click", async () => {
   } finally {
     setButtonsState({
       previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: previewReady,
       buildEnabled: previewReady,
     });
   }
@@ -798,6 +893,7 @@ hideProgress();
 setButtonsState({
   previewEnabled: true,
   miottsEnabled: false,
+  miottsPreviewEnabled: false,
   buildEnabled: false,
 });
 loadBuildInfo().finally(() => loadComputeTargets());

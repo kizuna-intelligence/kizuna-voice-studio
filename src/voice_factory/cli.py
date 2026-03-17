@@ -91,6 +91,10 @@ def main() -> None:
     miotts_package_parser.add_argument("--mio-base-url", default=DEFAULT_MIO_BASE_URL)
     miotts_package_parser.add_argument("--model-id")
 
+    miotts_preview_parser = subparsers.add_parser("build-miotts-package-preview")
+    miotts_preview_parser.add_argument("--project-id", required=True)
+    miotts_preview_parser.add_argument("--texts-json")
+
     start_job_parser = subparsers.add_parser("start-job")
     start_job_parser.add_argument("--job-type", required=True)
     start_job_parser.add_argument("--project-id", required=True)
@@ -210,6 +214,10 @@ def main() -> None:
                 model_id=args.model_id,
             )
         )
+        return
+    if args.command == "build-miotts-package-preview":
+        texts = json.loads(args.texts_json) if args.texts_json else None
+        _print(service.build_miotts_package_previews(args.project_id, texts=texts))
         return
     if args.command == "start-job":
         _print(
