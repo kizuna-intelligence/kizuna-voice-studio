@@ -12,6 +12,7 @@ Usage:
 Examples:
   scripts/build-electron-release.sh --variant linux-nvidia
   scripts/build-electron-release.sh --variant windows-nvidia
+  scripts/build-electron-release.sh --variant windows-amd
 
 Notes:
   - Run this on the target OS for the variant you want to publish.
