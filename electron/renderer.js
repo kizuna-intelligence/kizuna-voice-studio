@@ -96,6 +96,11 @@ function fallbackComputeTargets(profile = buildInfo.backendProfile) {
   if (profile === "cpu") {
     return [{ value: "cpu", label: "CPU", description: "この配布版は CPU 実行を前提にしています。" }];
   }
+  if (profile === "amd") {
+    return [
+      { value: "cpu", label: "CPU / 互換実行", description: "この配布版は AMD 環境向けの互換実行を前提にしています。" },
+    ];
+  }
   if (profile === "apple") {
     return [
       { value: "auto", label: "自動で選ぶ", description: "Apple Silicon の実行環境を自動で使います。" },
@@ -128,12 +133,28 @@ function selectedSeedVoiceBackend() {
   return seedVoiceBackendSelect.value || "kizuna";
 }
 
+function configureSeedVoiceBackendOptions() {
+  const isAmdBuild = buildInfo.backendProfile === "amd";
+  const kizunaOption = Array.from(seedVoiceBackendSelect.options).find((option) => option.value === "kizuna");
+  if (kizunaOption) {
+    kizunaOption.disabled = isAmdBuild;
+    kizunaOption.hidden = isAmdBuild;
+  }
+  if (isAmdBuild) {
+    seedVoiceBackendSelect.value = "qwen";
+  }
+  updateSeedVoiceBackendCopy();
+}
+
 function buildVariantSummary(info) {
   if (!info || !buildVariantNote) {
     return "";
   }
   if (info.backendProfile === "nvidia") {
     return `この配布版は NVIDIA GPU 向けです。CUDA は新しい系統のみを対象にしています。初回起動時は必要な Python 環境を自動で準備し、既定の実行先は ${info.defaultComputeTarget.toUpperCase()} です。`;
+  }
+  if (info.backendProfile === "amd") {
+    return "この配布版は AMD / 非NVIDIA 環境向けです。まずは Qwen Voice Designer と互換実行経路を使って動作確認します。";
   }
   if (info.backendProfile === "cpu") {
     return "この配布版は CPU 専用です。初回起動時に必要な Python 環境を自動で準備し、GPU 学習や GPU 推論は含めません。";
@@ -215,6 +236,7 @@ async function loadBuildInfo() {
   } catch (error) {
     // Keep the local defaults when build metadata is unavailable.
   }
+  configureSeedVoiceBackendOptions();
   updateBuildVariantNote();
 }
 
