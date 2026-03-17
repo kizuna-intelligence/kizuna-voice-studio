@@ -13,7 +13,6 @@ const COMMON_PACKAGES = [
   "gradio>=5.21.0",
   "httpx>=0.28.0",
   "huggingface_hub>=0.30.0",
-  "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
   "librosa==0.10.2",
   "numpy>=1.26.0",
   "onnxruntime>=1.17.0",
@@ -25,6 +24,12 @@ const COMMON_PACKAGES = [
   "uvicorn>=0.34.0",
   "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
 ];
+const PROFILE_PACKAGES = {
+  default: [
+    "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
+  ],
+  amd: [],
+};
 const PACKAGE_RUNTIME_PACKAGES = {
   piper: [
     "numpy>=1.26.0,<2",
@@ -96,6 +101,17 @@ function managedPaths(app, backendProfile) {
 
 function ensureDir(targetPath) {
   fs.mkdirSync(targetPath, { recursive: true });
+}
+
+function packagesForProfile(backendProfile) {
+  const profilePackages = PROFILE_PACKAGES[backendProfile] || PROFILE_PACKAGES.default;
+  return [...COMMON_PACKAGES, ...profilePackages];
+}
+
+function resetManagedRuntime(paths) {
+  fs.rmSync(paths.venvDir, { recursive: true, force: true });
+  fs.rmSync(paths.packageRuntimeDir, { recursive: true, force: true });
+  fs.rmSync(paths.bootstrapDir, { recursive: true, force: true });
 }
 
 function commandExists(command) {
@@ -312,6 +328,7 @@ function installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile,
     UV_PYTHON_INSTALL_DIR: paths.pythonInstallDir,
   };
   runChecked(uvCommand, ["venv", paths.venvDir, "--python", MANAGED_PYTHON_VERSION], { env: uvEnv });
+  runChecked(paths.pythonBinary, ["-m", "ensurepip", "--upgrade"], { env: uvEnv, cwd: backendRoot });
 
   if (backendProfile === "nvidia") {
     runChecked(
@@ -343,7 +360,7 @@ function installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile,
 
   runChecked(
     uvCommand,
-    ["pip", "install", "--python", paths.pythonBinary, ...COMMON_PACKAGES],
+    ["pip", "install", "--python", paths.pythonBinary, ...packagesForProfile(backendProfile)],
     { env: uvEnv, cwd: backendRoot }
   );
   runChecked(
@@ -351,7 +368,9 @@ function installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile,
     ["pip", "install", "--python", paths.pythonBinary, "--no-deps", "--force-reinstall", "--editable", backendRoot],
     { env: uvEnv, cwd: backendRoot }
   );
-  installPackageRuntimeEnvironments(uvCommand, paths, backendRoot, backendProfile);
+  if (backendProfile !== "amd") {
+    installPackageRuntimeEnvironments(uvCommand, paths, backendRoot, backendProfile);
+  }
 }
 
 async function ensureManagedBackend({
@@ -366,6 +385,7 @@ async function ensureManagedBackend({
   const paths = managedPaths(app, backendProfile);
   const expectedMeta = installMeta(appVersion, buildFlavor, backendProfile, cudaChannel);
   if (!isBootstrapFresh(paths, expectedMeta)) {
+    resetManagedRuntime(paths);
     const uvCommand = await ensureUv(paths);
     installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile, cudaChannel);
     ensureDir(paths.bootstrapDir);
