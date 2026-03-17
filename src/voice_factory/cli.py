@@ -86,6 +86,11 @@ def main() -> None:
     sbv2_package_parser.add_argument("--project-id", required=True)
     sbv2_package_parser.add_argument("--style-bert-vits2-root")
 
+    miotts_package_parser = subparsers.add_parser("build-installable-miotts-package")
+    miotts_package_parser.add_argument("--project-id", required=True)
+    miotts_package_parser.add_argument("--mio-base-url", default=DEFAULT_MIO_BASE_URL)
+    miotts_package_parser.add_argument("--model-id")
+
     start_job_parser = subparsers.add_parser("start-job")
     start_job_parser.add_argument("--job-type", required=True)
     start_job_parser.add_argument("--project-id", required=True)
@@ -194,6 +199,15 @@ def main() -> None:
             service.build_installable_sbv2_package(
                 args.project_id,
                 style_bert_vits2_root=args.style_bert_vits2_root,
+            )
+        )
+        return
+    if args.command == "build-installable-miotts-package":
+        _print(
+            service.build_installable_miotts_package(
+                args.project_id,
+                mio_base_url=args.mio_base_url,
+                model_id=args.model_id,
             )
         )
         return

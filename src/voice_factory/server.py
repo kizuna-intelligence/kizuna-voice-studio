@@ -72,6 +72,11 @@ class BuildSBV2PackageRequest(BaseModel):
     style_bert_vits2_root: str | None = None
 
 
+class BuildMioTtsPackageRequest(BaseModel):
+    mio_base_url: str = service.default_mio_base_url()
+    model_id: str | None = None
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "projects": service.list_projects()}
@@ -190,6 +195,25 @@ def download_sbv2_package(project_id: str) -> FileResponse:
     return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
 
 
+@app.get("/v1/projects/{project_id}/package/miotts")
+def get_miotts_package(project_id: str) -> dict:
+    payload = service.get_miotts_package_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="MioTTS package not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/miotts/download")
+def download_miotts_package(project_id: str) -> FileResponse:
+    manifest = service.get_miotts_package_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="MioTTS package not ready")
+    archive_path = Path(manifest["archive_path"])
+    if not archive_path.exists():
+        raise HTTPException(status_code=404, detail="MioTTS package archive not found")
+    return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
+
+
 @app.post("/v1/projects/{project_id}/dataset")
 def build_dataset(project_id: str, payload: BuildDatasetRequest) -> dict:
     return service.build_dataset(
@@ -252,6 +276,15 @@ def build_sbv2_package(project_id: str, payload: BuildSBV2PackageRequest) -> dic
     return service.build_installable_sbv2_package(
         project_id,
         style_bert_vits2_root=payload.style_bert_vits2_root,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/miotts")
+def build_miotts_package(project_id: str, payload: BuildMioTtsPackageRequest) -> dict:
+    return service.build_installable_miotts_package(
+        project_id,
+        mio_base_url=payload.mio_base_url,
+        model_id=payload.model_id,
     )
 
 

@@ -36,6 +36,8 @@ class VoiceFactoryService:
     )
     _PIPER_PACKAGE_NAME = "piper-voice"
     _PIPER_MODULE_NAME = "piper_voice"
+    _MIOTTS_PACKAGE_NAME = "miotts-reference-voice"
+    _MIOTTS_MODULE_NAME = "miotts_reference_voice"
     _SBV2_PACKAGE_NAME = "style-bert-vits2-voice"
     _SBV2_MODULE_NAME = "style_bert_vits2_voice"
 
@@ -430,6 +432,9 @@ class VoiceFactoryService:
     def _sbv2_package_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).distribution_dir / "sbv2-package.json"
 
+    def _miotts_package_manifest_path(self, project_id: str) -> Path:
+        return self.get_project_paths(project_id).distribution_dir / "miotts-package.json"
+
     def plan_project(self, spec: VoiceProjectSpec) -> dict[str, Any]:
         paths = self.get_project_paths(spec.project_id)
         for directory in (
@@ -770,6 +775,12 @@ class VoiceFactoryService:
             return None
         return json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    def get_miotts_package_manifest(self, project_id: str) -> dict[str, Any] | None:
+        manifest_path = self._miotts_package_manifest_path(project_id)
+        if not manifest_path.exists():
+            return None
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
     def get_preview_audio_path(self, project_id: str) -> Path:
         return self._preview_audio_path(project_id)
 
@@ -778,6 +789,7 @@ class VoiceFactoryService:
         preview = self.get_preview_manifest(project_id)
         package_manifest = self.get_package_manifest(project_id)
         sbv2_package_manifest = self.get_sbv2_package_manifest(project_id)
+        miotts_package_manifest = self.get_miotts_package_manifest(project_id)
         dataset_manifest_path = self._dataset_manifest_path(project_id)
         item_count = None
         if dataset_manifest_path.exists():
@@ -799,6 +811,10 @@ class VoiceFactoryService:
             "sbv2_package": {
                 "ready": sbv2_package_manifest is not None,
                 "manifest": sbv2_package_manifest,
+            },
+            "miotts_package": {
+                "ready": miotts_package_manifest is not None,
+                "manifest": miotts_package_manifest,
             },
             "jobs": self.list_jobs(project_id=project_id)[:10],
         }
@@ -1943,6 +1959,234 @@ class VoiceFactoryService:
             "config_path": export_result["config_path"],
         }
         self._package_manifest_path(project_id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return manifest
+
+    def build_installable_miotts_package(
+        self,
+        project_id: str,
+        *,
+        mio_base_url: str | None = None,
+        model_id: str | None = None,
+    ) -> dict[str, str]:
+        paths = self.get_project_paths(project_id)
+        spec = self.load_project(project_id)
+        preview_manifest = self.get_preview_manifest(project_id)
+        reference_audio_path = self.get_preview_audio_path(project_id)
+        if preview_manifest is None or not reference_audio_path.exists():
+            raise FileNotFoundError("Preview is not ready. Generate the seed voice first.")
+
+        resolved_mio_base_url = (mio_base_url or self.default_mio_base_url()).rstrip("/")
+        resolved_model_id = model_id or spec.mio_model_label
+        package_name = self._MIOTTS_PACKAGE_NAME
+        module_name = self._MIOTTS_MODULE_NAME
+        package_dir = paths.distribution_dir / package_name
+        if package_dir.exists():
+            shutil.rmtree(package_dir)
+
+        src_dir = package_dir / "src" / module_name
+        assets_dir = src_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(reference_audio_path, assets_dir / "reference.wav")
+
+        (src_dir / "__init__.py").write_text(
+            "\n".join(
+                [
+                    '"""Portable MioTTS reference voice package."""',
+                    "",
+                    "from .voice import PortableMioVoice, load_voice",
+                    "",
+                    '__all__ = ["PortableMioVoice", "load_voice"]',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (src_dir / "voice.py").write_text(
+            "\n".join(
+                [
+                    "from __future__ import annotations",
+                    "",
+                    "import os",
+                    "from importlib import resources",
+                    "from pathlib import Path",
+                    "",
+                    "import httpx",
+                    "",
+                    f'DEFAULT_API_BASE = "{resolved_mio_base_url}"',
+                    f'DEFAULT_MODEL_ID = "{resolved_model_id}"',
+                    "",
+                    "",
+                    "def _reference_audio_path() -> Path:",
+                    '    resource = resources.files(__package__) / "assets" / "reference.wav"',
+                    "    return Path(resource)",
+                    "",
+                    "",
+                    "class PortableMioVoice:",
+                    "    def __init__(",
+                    "        self,",
+                    "        *,",
+                    "        api_base_url: str | None = None,",
+                    "        model_id: str | None = None,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        timeout: float = 120.0,",
+                    "    ) -> None:",
+                    '        env_api_base = os.environ.get("MIOTTS_API_BASE", "").strip()',
+                    "        self.api_base_url = (api_base_url or env_api_base or DEFAULT_API_BASE).rstrip('/')",
+                    "        self.model_id = model_id or DEFAULT_MODEL_ID",
+                    "        self.reference_audio_path = (",
+                    "            Path(reference_audio_path).expanduser().resolve()",
+                    "            if reference_audio_path is not None",
+                    "            else _reference_audio_path()",
+                    "        )",
+                    "        self.timeout = timeout",
+                    "",
+                    "    def synthesize(self, text: str) -> bytes:",
+                    "        if not text or not text.strip():",
+                    '            raise ValueError("text is required")',
+                    "        with self.reference_audio_path.open('rb') as reference_audio:",
+                    "            files = {",
+                    "                'reference_audio': (self.reference_audio_path.name, reference_audio, 'audio/wav')",
+                    "            }",
+                    "            data = {",
+                    "                'text': text,",
+                    "                'model': self.model_id,",
+                    "                'output_format': 'wav',",
+                    "            }",
+                    "            with httpx.Client(timeout=self.timeout) as client:",
+                    "                response = client.post(",
+                    "                    f'{self.api_base_url}/v1/tts/file',",
+                    "                    data=data,",
+                    "                    files=files,",
+                    "                )",
+                    "                response.raise_for_status()",
+                    "                return response.content",
+                    "",
+                    "    def synthesize_to_file(self, text: str, output_path: str | os.PathLike[str]) -> str:",
+                    "        output = Path(output_path)",
+                    "        output.parent.mkdir(parents=True, exist_ok=True)",
+                    "        output.write_bytes(self.synthesize(text))",
+                    "        return str(output)",
+                    "",
+                    "    def save_wav(self, text: str, output_path: str | os.PathLike[str]) -> str:",
+                    "        return self.synthesize_to_file(text, output_path)",
+                    "",
+                    "",
+                    "def load_voice(",
+                    "    *,",
+                    "    api_base_url: str | None = None,",
+                    "    model_id: str | None = None,",
+                    "    reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "    timeout: float = 120.0,",
+                    ") -> PortableMioVoice:",
+                    "    return PortableMioVoice(",
+                    "        api_base_url=api_base_url,",
+                    "        model_id=model_id,",
+                    "        reference_audio_path=reference_audio_path,",
+                    "        timeout=timeout,",
+                    "    )",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "README.md").write_text(
+            "\n".join(
+                [
+                    f"# {package_name}",
+                    "",
+                    "Generated by Kizuna Voice Studio.",
+                    "",
+                    "この zip には学習済みモデルは含まれません。",
+                    "プレビューで確定した `reference.wav` を同封し、MioTTS zero-shot API を使って音声生成します。",
+                    "",
+                    "## Install",
+                    "",
+                    "```bash",
+                    f"pip install {package_name}.zip",
+                    "```",
+                    "",
+                    "## Usage",
+                    "",
+                    "```python",
+                    f"from {module_name} import load_voice",
+                    "",
+                    "voice = load_voice()",
+                    'voice.save_wav("こんにちは。よろしくお願いします。", "sample.wav")',
+                    "```",
+                    "",
+                    "必要なら API ベース URL を切り替えられます。",
+                    "",
+                    "```python",
+                    f"from {module_name} import load_voice",
+                    "",
+                    'voice = load_voice(api_base_url=\"https://your-miotts-api.example.com\")',
+                    "```",
+                    "",
+                    f"- Source prompt: {spec.style_instruction}",
+                    f"- Seed voice backend: {spec.seed_voice_backend}",
+                    f"- Seed voice model: {spec.seed_voice_model if spec.seed_voice_backend == 'kizuna' else spec.qwen_model_id}",
+                    f"- MioTTS model: {resolved_model_id}",
+                    f"- MioTTS API base: {resolved_mio_base_url}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "pyproject.toml").write_text(
+            "\n".join(
+                [
+                    "[build-system]",
+                    'requires = ["setuptools>=68"]',
+                    'build-backend = "setuptools.build_meta"',
+                    "",
+                    "[project]",
+                    f'name = "{package_name}"',
+                    'version = "0.1.0"',
+                    'description = "Portable MioTTS reference voice package."',
+                    'readme = "README.md"',
+                    'requires-python = ">=3.10"',
+                    "dependencies = [",
+                    '  "httpx>=0.27.0",',
+                    "]",
+                    "",
+                    "[tool.setuptools]",
+                    'package-dir = {"" = "src"}',
+                    'include-package-data = true',
+                    "",
+                    "[tool.setuptools.packages.find]",
+                    'where = ["src"]',
+                    "",
+                    "[tool.setuptools.package-data]",
+                    f'"{module_name}" = ["assets/*.wav"]',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        archive_base = paths.distribution_dir / package_name
+        archive_path = Path(
+            shutil.make_archive(
+                str(archive_base),
+                "zip",
+                root_dir=paths.distribution_dir,
+                base_dir=package_name,
+            )
+        )
+        manifest = {
+            "project_id": project_id,
+            "package_name": package_name,
+            "module_name": module_name,
+            "package_dir": str(package_dir),
+            "archive_path": str(archive_path),
+            "pip_install_example": f"pip install {archive_path.name}",
+            "reference_audio_path": str(reference_audio_path),
+            "mio_base_url": resolved_mio_base_url,
+            "mio_model_id": resolved_model_id,
+        }
+        self._miotts_package_manifest_path(project_id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )

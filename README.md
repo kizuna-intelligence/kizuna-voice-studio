@@ -15,6 +15,7 @@
 - 日本語の説明から種音声を作る
 - 種音声を聞いてから本番の音声モデル作成に進む
 - `Piper TTS` または `Style-Bert-VITS2` を選んで学習する
+- 学習なしで `MioTTS` 用の参照音声パッケージを作る
 - 学習後のモデルを Python パッケージとして書き出す
 
 ## どんな人向けか
@@ -69,6 +70,9 @@
 5. できた音声を聞きます
 6. 問題なければ作るモデルを選んで `2. この声で TTS を作る` を押します
 7. 完了後、生成されたモデルをダウンロードして使います
+
+種音声が気に入っていて、学習はまだしたくない場合は、
+`MioTTS 参照音声パッケージ` を作ってすぐ使うこともできます。
 
 ## 初回起動について
 
@@ -143,6 +147,27 @@ voice.synthesize_to_file("こんにちは", "sample.wav")
 ```
 
 `Style-Bert-VITS2` でも同様に installable package を作れます。
+
+### 学習なしで使う MioTTS パッケージ
+
+種音声を作ったあと、その `reference.wav` を同封した `MioTTS` 用 zip を作れます。
+
+この zip は `pip install` すると、参照音声つきの voice module として使えます。
+学習済みモデルそのものを同封するのではなく、`MioTTS` の zero-shot API に参照音声を渡して音声生成します。
+
+```bash
+pip install miotts-reference-voice.zip
+```
+
+```python
+from miotts_reference_voice import load_voice
+
+voice = load_voice()
+voice.save_wav("こんにちは。よろしくお願いします。", "sample.wav")
+```
+
+`MioTTS` のモデルは、現行の既定では `Aratako/MioTTS-1.7B` を使います。
+手元で API を立てている場合は、`api_base_url` を差し替えて使えます。
 
 ## 開発者向けの補足
 

@@ -67,6 +67,25 @@
               <audio id="previewAudio" controls preload="none"></audio>
             </section>
 
+            <section id="miottsPanel" class="model-panel locked-panel" aria-label="学習なしで使う">
+              <div>
+                <p class="section-label">学習なしで使う</p>
+                <h2>MioTTS 参照音声パッケージ</h2>
+              </div>
+              <p class="panel-lead">
+                学習はせず、今できた種音声をそのまま `reference.wav` として同封した
+                `pip install` 用 zip を作ります。
+              </p>
+              <div class="button-row">
+                <button id="buildMiottsPackageButton" class="secondary-button" disabled>
+                  学習なしの MioTTS パッケージを作る
+                </button>
+                <a id="downloadMiottsPackageButton" class="download-button hidden" href="#" download>
+                  MioTTS パッケージをダウンロード
+                </a>
+              </div>
+            </section>
+
             <section id="modelPanel" class="model-panel locked-panel" aria-label="作るモデル">
               <div class="model-panel-header">
                 <div>
