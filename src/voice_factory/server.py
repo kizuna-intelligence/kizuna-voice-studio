@@ -81,6 +81,11 @@ class BuildMioTtsPackagePreviewRequest(BaseModel):
     texts: list[str] | None = None
 
 
+class BuildPackagePreviewRequest(BaseModel):
+    texts: list[str] | None = None
+    compute_target: str = "auto"
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "projects": service.list_projects()}
@@ -180,6 +185,28 @@ def download_package(project_id: str) -> FileResponse:
     return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
 
 
+@app.get("/v1/projects/{project_id}/package/preview")
+def get_package_preview(project_id: str) -> dict:
+    payload = service.get_package_preview_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Package preview is not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/preview/{sample_id}/audio")
+def get_package_preview_audio(project_id: str, sample_id: str) -> FileResponse:
+    manifest = service.get_package_preview_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Package preview is not ready")
+    sample = next((item for item in manifest["samples"] if item["id"] == sample_id), None)
+    if sample is None:
+        raise HTTPException(status_code=404, detail="Package preview sample not found")
+    audio_path = Path(sample["audio_path"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Package preview audio not found")
+    return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
+
+
 @app.get("/v1/projects/{project_id}/package/sbv2")
 def get_sbv2_package(project_id: str) -> dict:
     payload = service.get_sbv2_package_manifest(project_id)
@@ -197,6 +224,28 @@ def download_sbv2_package(project_id: str) -> FileResponse:
     if not archive_path.exists():
         raise HTTPException(status_code=404, detail="SBV2 package archive not found")
     return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
+
+
+@app.get("/v1/projects/{project_id}/package/sbv2/preview")
+def get_sbv2_package_preview(project_id: str) -> dict:
+    payload = service.get_sbv2_package_preview_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="SBV2 package preview is not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/sbv2/preview/{sample_id}/audio")
+def get_sbv2_package_preview_audio(project_id: str, sample_id: str) -> FileResponse:
+    manifest = service.get_sbv2_package_preview_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="SBV2 package preview is not ready")
+    sample = next((item for item in manifest["samples"] if item["id"] == sample_id), None)
+    if sample is None:
+        raise HTTPException(status_code=404, detail="SBV2 preview sample not found")
+    audio_path = Path(sample["audio_path"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="SBV2 preview audio not found")
+    return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
 
 
 @app.get("/v1/projects/{project_id}/package/miotts")
@@ -302,6 +351,26 @@ def build_sbv2_package(project_id: str, payload: BuildSBV2PackageRequest) -> dic
     return service.build_installable_sbv2_package(
         project_id,
         style_bert_vits2_root=payload.style_bert_vits2_root,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/preview")
+def build_package_preview(project_id: str, payload: BuildPackagePreviewRequest) -> dict:
+    return service.build_generated_package_previews(
+        project_id,
+        family="piper",
+        texts=payload.texts,
+        compute_target=payload.compute_target,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/sbv2/preview")
+def build_sbv2_package_preview(project_id: str, payload: BuildPackagePreviewRequest) -> dict:
+    return service.build_generated_package_previews(
+        project_id,
+        family="sbv2",
+        texts=payload.texts,
+        compute_target=payload.compute_target,
     )
 
 

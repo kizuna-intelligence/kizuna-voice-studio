@@ -81,12 +81,23 @@
                   学習なしの MioTTS パッケージを作る
                 </button>
                 <button id="previewMiottsPackageButton" class="secondary-button" disabled>
-                  このパッケージで3つ試聴する
+                  このパッケージで試す
                 </button>
                 <a id="downloadMiottsPackageButton" class="download-button hidden" href="#" download>
                   MioTTS パッケージをダウンロード
                 </a>
               </div>
+              <label>
+                試したい文章
+                <textarea
+                  id="miottsPreviewTexts"
+                  rows="4"
+                  placeholder="1行に1つずつ入力してください。空ならおすすめの3文を使います。"
+                >こんにちは。これは MioTTS パッケージの自由入力プレビューです。
+この声で、アプリに組み込んだときの読み上げを確認できます。
+短い案内文やナレーションを、気軽に試せるようにしています。</textarea>
+                <span class="field-hint">1行に1つずつ入れると、その行ごとに音声を生成します。</span>
+              </label>
               <div id="miottsPreviewList" class="sample-preview-list hidden"></div>
             </section>
 
@@ -120,6 +131,23 @@
                 <button id="buildTtsButton" class="secondary-button" disabled>2. この声で TTS を作る</button>
                 <a id="downloadButton" class="download-button hidden" href="#" download>完成した Python パッケージをダウンロード</a>
               </div>
+              <label>
+                完成したパッケージで試したい文章
+                <textarea
+                  id="generatedPackagePreviewTexts"
+                  rows="4"
+                  placeholder="1行に1つずつ入力してください。空ならおすすめの3文を使います。"
+                >こんにちは。これは完成した TTS パッケージの自由入力プレビューです。
+この文章で、実際の読み上げの雰囲気を確認します。
+完成後すぐに、別の文章でも声の感じを試せるようにしています。</textarea>
+                <span class="field-hint">完成した package と同じ経路で、そのまま音声を作って確認します。</span>
+              </label>
+              <div class="button-row">
+                <button id="previewGeneratedPackageButton" class="secondary-button" disabled>
+                  完成したパッケージで試す
+                </button>
+              </div>
+              <div id="generatedPackagePreviewList" class="sample-preview-list hidden"></div>
             </section>
           </div>
         </div>

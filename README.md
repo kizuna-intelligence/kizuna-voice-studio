@@ -10,6 +10,19 @@
 
 という流れで使えるようにしています。
 
+## 先に知っておくこと
+
+- 現在の配布版は、基本的に `NVIDIA GPU` か `Apple Silicon` を前提にしています
+- `Windows` と `Linux` は `NVIDIA GPU 版` を使う前提です
+- `CPU版` は現時点では配布していません
+- 初回起動時は、必要な Python 環境やモデルを自動で準備するため時間がかかります
+- 音声モデルをダウンロードするタイミングでは、数分以上かかることがあります
+
+迷ったときは、まず次の考え方で選ぶのが簡単です。
+
+- `Windows / Linux` で NVIDIA GPU がある人: `windows-nvidia` または `linux-nvidia`
+- `macOS` で Apple Silicon の人: `macos-apple-silicon`
+
 ## できること
 
 - 日本語の説明から種音声を作る
@@ -73,6 +86,16 @@
 
 種音声が気に入っていて、学習はまだしたくない場合は、
 `MioTTS 参照音声パッケージ` を作ってすぐ使うこともできます。
+
+また、書き出した package をダウンロードする前に、
+アプリ上で自由なテキストを入れて試聴できます。
+
+- `Piper TTS` package の試聴
+- `Style-Bert-VITS2` package の試聴
+- `MioTTS` 参照音声 package の試聴
+
+`Style-Bert-VITS2` の package 試聴は、配布版では安定性を優先して
+CPU で実行しています。
 
 ## 初回起動について
 

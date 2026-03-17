@@ -19,9 +19,13 @@ const miottsPanel = document.getElementById("miottsPanel");
 const buildMiottsPackageButton = document.getElementById("buildMiottsPackageButton");
 const previewMiottsPackageButton = document.getElementById("previewMiottsPackageButton");
 const downloadMiottsPackageButton = document.getElementById("downloadMiottsPackageButton");
+const miottsPreviewTextsInput = document.getElementById("miottsPreviewTexts");
 const miottsPreviewList = document.getElementById("miottsPreviewList");
 const buildTtsButton = document.getElementById("buildTtsButton");
 const downloadButton = document.getElementById("downloadButton");
+const generatedPackagePreviewTextsInput = document.getElementById("generatedPackagePreviewTexts");
+const previewGeneratedPackageButton = document.getElementById("previewGeneratedPackageButton");
+const generatedPackagePreviewList = document.getElementById("generatedPackagePreviewList");
 const helpButton = document.getElementById("helpButton");
 const closeHelpButton = document.getElementById("closeHelpButton");
 const helpOverlay = document.getElementById("helpOverlay");
@@ -395,15 +399,18 @@ function setButtonsState({
   previewBusy = false,
   miottsBusy = false,
   miottsPreviewBusy = false,
+  packagePreviewBusy = false,
   buildBusy = false,
   previewEnabled = true,
   miottsEnabled = false,
   miottsPreviewEnabled = false,
+  packagePreviewEnabled = false,
   buildEnabled = false,
 } = {}) {
   previewButton.disabled = previewBusy || !previewEnabled;
   buildMiottsPackageButton.disabled = miottsBusy || !miottsEnabled;
   previewMiottsPackageButton.disabled = miottsPreviewBusy || !miottsPreviewEnabled;
+  previewGeneratedPackageButton.disabled = packagePreviewBusy || !packagePreviewEnabled;
   buildTtsButton.disabled = buildBusy || !buildEnabled;
   previewButton.textContent = previewBusy ? "種音声を生成中..." : "1. 種音声を作成";
   buildMiottsPackageButton.textContent = miottsBusy
@@ -411,7 +418,10 @@ function setButtonsState({
     : "学習なしの MioTTS パッケージを作る";
   previewMiottsPackageButton.textContent = miottsPreviewBusy
     ? "試聴音声を生成中..."
-    : "このパッケージで3つ試聴する";
+    : "このパッケージで試す";
+  previewGeneratedPackageButton.textContent = packagePreviewBusy
+    ? "試聴音声を生成中..."
+    : "完成したパッケージで試す";
   buildTtsButton.textContent = buildBusy ? "TTS を作成中..." : "2. この声で TTS を作る";
 }
 
@@ -525,6 +535,20 @@ function clearMiottsSamplePreviews() {
   miottsPreviewList.classList.add("hidden");
 }
 
+function collectMiottsPreviewTexts() {
+  return (miottsPreviewTextsInput?.value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function collectGeneratedPackagePreviewTexts() {
+  return (generatedPackagePreviewTextsInput?.value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function setMiottsSamplePreviews(projectId, manifest) {
   if (!manifest?.samples?.length) {
     clearMiottsSamplePreviews();
@@ -553,6 +577,47 @@ function setMiottsSamplePreviews(projectId, manifest) {
     miottsPreviewList.appendChild(card);
   });
   miottsPreviewList.classList.remove("hidden");
+}
+
+function clearGeneratedPackagePreviews() {
+  generatedPackagePreviewList.innerHTML = "";
+  generatedPackagePreviewList.classList.add("hidden");
+}
+
+function generatedPackagePreviewAudioPath(projectId, modelFamily, sampleId) {
+  return modelFamily === "sbv2"
+    ? `/v1/projects/${encodeURIComponent(projectId)}/package/sbv2/preview/${encodeURIComponent(sampleId)}/audio`
+    : `/v1/projects/${encodeURIComponent(projectId)}/package/preview/${encodeURIComponent(sampleId)}/audio`;
+}
+
+function setGeneratedPackagePreviews(projectId, manifest, modelFamily) {
+  if (!manifest?.samples?.length) {
+    clearGeneratedPackagePreviews();
+    return;
+  }
+
+  generatedPackagePreviewList.innerHTML = "";
+  manifest.samples.forEach((sample, index) => {
+    const card = document.createElement("article");
+    card.className = "sample-preview-card";
+
+    const title = document.createElement("h3");
+    title.textContent = `試聴 ${index + 1}`;
+    card.appendChild(title);
+
+    const text = document.createElement("p");
+    text.textContent = sample.text;
+    card.appendChild(text);
+
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.preload = "none";
+    audio.src = `${apiUrl(generatedPackagePreviewAudioPath(projectId, modelFamily, sample.id))}?t=${Date.now()}`;
+    card.appendChild(audio);
+
+    generatedPackagePreviewList.appendChild(card);
+  });
+  generatedPackagePreviewList.classList.remove("hidden");
 }
 
 function openHelpOverlay() {
@@ -587,9 +652,12 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
 
   const activePackage =
     activeModelFamily === "sbv2" ? payload.sbv2_package?.manifest : payload.package?.manifest;
+  const activePackagePreview =
+    activeModelFamily === "sbv2" ? payload.sbv2_package_preview?.manifest : payload.package_preview?.manifest;
   setDownloadReady(projectId, activePackage, activeModelFamily);
   setMiottsDownloadReady(projectId, payload.miotts_package?.manifest);
   setMiottsSamplePreviews(projectId, payload.miotts_package_preview?.manifest);
+  setGeneratedPackagePreviews(projectId, activePackagePreview, activeModelFamily);
 
   if ((activeModelFamily === "piper" && payload.package?.ready) || (activeModelFamily === "sbv2" && payload.sbv2_package?.ready)) {
     previewReady = true;
@@ -603,6 +671,7 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
         previewEnabled: true,
         miottsEnabled: true,
         miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+        packagePreviewEnabled: Boolean(activePackage || activePackagePreview),
         buildEnabled: true,
       });
     setMiottsPanelEnabled(true);
@@ -640,6 +709,7 @@ async function pollJob(jobId, projectId, { mode }) {
           previewEnabled: true,
           miottsEnabled: true,
           miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+          packagePreviewEnabled: false,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
@@ -657,6 +727,7 @@ async function pollJob(jobId, projectId, { mode }) {
           previewEnabled: true,
           miottsEnabled: true,
           miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+          packagePreviewEnabled: true,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
@@ -719,6 +790,7 @@ previewButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: false,
       miottsPreviewEnabled: false,
+      packagePreviewEnabled: false,
       buildEnabled: false,
     });
     clearPreview();
@@ -726,6 +798,7 @@ previewButton.addEventListener("click", async () => {
     setDownloadReady("", null, selectedModelFamily());
     setMiottsDownloadReady("", null);
     clearMiottsSamplePreviews();
+    clearGeneratedPackagePreviews();
     setInitialStageBoard();
     setMiottsPanelEnabled(false);
     setModelSelectionEnabled(false);
@@ -757,6 +830,7 @@ previewButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: false,
+      packagePreviewEnabled: false,
       buildEnabled: previewReady,
     });
   }
@@ -775,6 +849,7 @@ buildMiottsPackageButton.addEventListener("click", async () => {
       miottsBusy: true,
       miottsEnabled: true,
       miottsPreviewEnabled: false,
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
     setMiottsDownloadReady("", null);
@@ -797,6 +872,7 @@ buildMiottsPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
   }
@@ -815,17 +891,20 @@ previewMiottsPackageButton.addEventListener("click", async () => {
       miottsEnabled: true,
       miottsPreviewBusy: true,
       miottsPreviewEnabled: true,
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
     clearMiottsSamplePreviews();
-    setStatus("MioTTS パッケージと同じ経路で、試聴音声を3つ生成しています。");
+    setStatus("MioTTS パッケージと同じ経路で、入力した文章の試聴音声を生成しています。");
     const payload = await request(`/v1/projects/${encodeURIComponent(projectId)}/package/miotts/preview`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        texts: collectMiottsPreviewTexts(),
+      }),
     });
     setOutput(payload);
     setMiottsSamplePreviews(projectId, payload);
-    setStatus("MioTTS パッケージの試聴音声を3つ用意しました。");
+    setStatus(`MioTTS パッケージの試聴音声を ${payload.samples?.length || 0} 本用意しました。`);
   } catch (error) {
     setStatus("MioTTS パッケージの試聴生成に失敗しました。詳細ログを確認してください。");
     setOutput({ error: String(error) });
@@ -834,6 +913,54 @@ previewMiottsPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+  }
+});
+
+previewGeneratedPackageButton.addEventListener("click", async () => {
+  const projectId = projectIdInput.value;
+  const modelFamily = selectedModelFamily();
+  if (!projectId) {
+    setStatus("先に種音声を作成して、声サンプルを確認してください。");
+    return;
+  }
+
+  try {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      packagePreviewBusy: true,
+      packagePreviewEnabled: true,
+      buildEnabled: previewReady,
+    });
+    clearGeneratedPackagePreviews();
+    setStatus(`${modelCopy[modelFamily].label} パッケージと同じ経路で、入力した文章の試聴音声を生成しています。`);
+    const path =
+      modelFamily === "sbv2"
+        ? `/v1/projects/${encodeURIComponent(projectId)}/package/sbv2/preview`
+        : `/v1/projects/${encodeURIComponent(projectId)}/package/preview`;
+    const payload = await request(path, {
+      method: "POST",
+      body: JSON.stringify({
+        texts: collectGeneratedPackagePreviewTexts(),
+        compute_target: selectedComputeTarget(),
+      }),
+    });
+    setOutput(payload);
+    setGeneratedPackagePreviews(projectId, payload, modelFamily);
+    setStatus(`${modelCopy[modelFamily].label} パッケージの試聴音声を ${payload.samples?.length || 0} 本用意しました。`);
+  } catch (error) {
+    setStatus("完成したパッケージの試聴生成に失敗しました。詳細ログを確認してください。");
+    setOutput({ error: String(error) });
+  } finally {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
   }
@@ -852,10 +979,12 @@ buildTtsButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: previewReady,
+      packagePreviewEnabled: false,
       buildBusy: true,
       buildEnabled: true,
     });
     setDownloadReady("", null, modelFamily);
+    clearGeneratedPackagePreviews();
     setPreviewReadyStageBoard();
     setStatus(`確認済みの種音声を使って ${modelCopy[modelFamily].label} を作成しています。`);
     showProgress("TTS の作成", 12);
@@ -878,6 +1007,7 @@ buildTtsButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: previewReady,
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
   }
@@ -894,6 +1024,7 @@ setButtonsState({
   previewEnabled: true,
   miottsEnabled: false,
   miottsPreviewEnabled: false,
+  packagePreviewEnabled: false,
   buildEnabled: false,
 });
 loadBuildInfo().finally(() => loadComputeTargets());
