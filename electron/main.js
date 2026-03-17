@@ -28,12 +28,10 @@ let backendStartPromise = null;
 function defaultPythonCandidates() {
   const bundledRoot = path.join(process.resourcesPath || appRoot, "python");
   const activeVenv = process.env.VIRTUAL_ENV || "";
-  const sharedDevVenv = "/home/yusuke/gitrepos/開発/venv";
   if (process.platform === "win32") {
     return [
       path.join(bundledRoot, "python.exe"),
       path.join(appRoot, "venv", "Scripts", "python.exe"),
-      path.join(sharedDevVenv, "Scripts", "python.exe"),
       activeVenv ? path.join(activeVenv, "Scripts", "python.exe") : "",
       "python.exe",
     ];
@@ -42,7 +40,6 @@ function defaultPythonCandidates() {
     path.join(bundledRoot, "bin", "python3"),
     path.join(bundledRoot, "bin", "python"),
     path.join(appRoot, "venv", "bin", "python"),
-    path.join(sharedDevVenv, "bin", "python"),
     activeVenv ? path.join(activeVenv, "bin", "python") : "",
     activeVenv ? path.join(activeVenv, "bin", "python3") : "",
     "python3",

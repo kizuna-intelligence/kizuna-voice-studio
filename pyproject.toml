@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voice-factory"
+name = "kizuna-voice-studio"
 version = "0.1.0"
-description = "Open-source-friendly voice factory scaffold for selectable seed generation, MioTTS dataset generation, SBV2/Piper training, and portable export."
+description = "Desktop app for creating, previewing, and exporting Japanese TTS voices with Kizuna Voice Designer, Qwen Voice Designer, MioTTS, Piper, and Style-Bert-VITS2."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Mugen Research"}]
