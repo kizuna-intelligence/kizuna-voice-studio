@@ -45,6 +45,18 @@ const variants = {
     cudaChannel: "latest",
     description: "Windows build for recent NVIDIA CUDA environments.",
   },
+  "windows-amd": {
+    key: "windows-amd",
+    platform: "win",
+    arch: "x64",
+    productName: "Voice Factory Windows AMD",
+    artifactName: "VoiceFactory-Windows-AMD-${version}.${ext}",
+    appId: "dev.mugen.voicefactory.windows.amd",
+    backendProfile: "amd",
+    defaultComputeTarget: "cpu",
+    cudaChannel: "none",
+    description: "Windows build for AMD and non-NVIDIA machines using the compatibility path.",
+  },
   "linux-nvidia": {
     key: "linux-nvidia",
     platform: "linux",

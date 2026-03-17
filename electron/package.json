@@ -9,6 +9,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:windows-nvidia": "node build-variant.js windows-nvidia",
+    "dist:windows-amd": "node build-variant.js windows-amd",
     "dist:linux-nvidia": "node build-variant.js linux-nvidia",
     "dist:macos-apple-silicon": "node build-variant.js macos-apple-silicon"
   },

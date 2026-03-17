@@ -13,7 +13,8 @@
 ## 先に知っておくこと
 
 - 現在の配布版は、基本的に `NVIDIA GPU` か `Apple Silicon` を前提にしています
-- `Windows` と `Linux` は `NVIDIA GPU 版` を使う前提です
+- `Windows` は `NVIDIA GPU 版` に加えて、`AMD / 非NVIDIA 向け互換版` も用意しています
+- `Linux` は `NVIDIA GPU 版` を使う前提です
 - `CPU版` は現時点では配布していません
 - 初回起動時は、必要な Python 環境やモデルを自動で準備するため時間がかかります
 - 音声モデルをダウンロードするタイミングでは、数分以上かかることがあります
@@ -21,6 +22,7 @@
 迷ったときは、まず次の考え方で選ぶのが簡単です。
 
 - `Windows / Linux` で NVIDIA GPU がある人: `windows-nvidia` または `linux-nvidia`
+- `Windows` で AMD GPU の人: `windows-amd`
 - `macOS` で Apple Silicon の人: `macos-apple-silicon`
 
 ## ダウンロードと起動
@@ -32,6 +34,7 @@
 ファイル名の目安は次のとおりです。
 
 - `Windows`: `VoiceFactory-Windows-NVIDIA-<version>.exe`
+- `Windows AMD`: `VoiceFactory-Windows-AMD-<version>.exe`
 - `Linux`: `VoiceFactory-Linux-NVIDIA-<version>.AppImage`
 - `macOS`: `VoiceFactory-macOS-Apple-Silicon-<version>.dmg` または `.zip`
 
@@ -41,6 +44,9 @@
 2. ダウンロードした `.exe` をダブルクリックします
 3. インストーラーが出たら、そのまま進めます
 4. インストール後、スタートメニューまたはデスクトップから `Kizuna Voice Studio` を起動します
+
+AMD GPU の Windows マシンでは、`VoiceFactory-Windows-AMD-<version>.exe` を使ってください。
+この版は現時点では `CPU / 互換経路` を優先して動くため、NVIDIA 版より遅くなることがあります。
 
 ### Linux
 
@@ -164,6 +170,7 @@ CPU で実行しています。
 現在の主な配布対象は次の 3 つです。
 
 - `windows-nvidia`
+- `windows-amd`
 - `linux-nvidia`
 - `macos-apple-silicon`
 
@@ -176,6 +183,12 @@ CPU で実行しています。
 - NVIDIA GPU 前提の版を用意します
 - 重い処理はジョブごとの別プロセスで動きます
 - 処理が終わるたびに GPU を解放します
+
+### Windows AMD
+
+- `windows-amd` を用意します
+- 現時点では `CPU / 互換経路` を優先した版です
+- NVIDIA 版より遅くなる代わりに、AMD 環境でも動作確認しやすくしています
 
 ### macOS
 

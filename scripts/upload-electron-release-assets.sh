@@ -14,6 +14,7 @@ Usage:
 Examples:
   scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant linux-nvidia
   scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-nvidia
+  scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-amd
 
 Notes:
   - Build locally first with scripts/build-electron-release.sh.
