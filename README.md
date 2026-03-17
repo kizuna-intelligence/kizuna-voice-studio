@@ -282,5 +282,12 @@ workflow:
 
 ## ライセンス
 
-ライセンスは `kizuna-intelligence/kizuna-voice-designer` と同じ方針です。
-詳しくは [LICENSE](LICENSE) を参照してください。
+このリポジトリ自体のライセンスは `Apache License 2.0` です。
+
+ただし、`Kizuna Voice Designer` を利用する部分、およびそれに由来する機能部分には
+`Kizuna Community License` が適用されます。
+
+ライセンスの見方は次のとおりです。
+
+- このリポジトリ全体: [LICENSE](LICENSE)
+- `Kizuna Voice Designer` 由来部分: [LICENSE.kizuna-voice-designer.txt](LICENSE.kizuna-voice-designer.txt)
