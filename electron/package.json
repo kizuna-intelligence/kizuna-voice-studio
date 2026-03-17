@@ -1,0 +1,57 @@
+{
+  "name": "voice-factory-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron frontend for Voice Factory",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:windows-nvidia": "node build-variant.js windows-nvidia",
+    "dist:linux-nvidia": "node build-variant.js linux-nvidia",
+    "dist:macos-apple-silicon": "node build-variant.js macos-apple-silicon"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.mugen.voicefactory",
+    "productName": "Voice Factory",
+    "files": [
+      "backend-bootstrap.js",
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "build-variant.js",
+      "variant-manifest.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../src",
+        "to": "backend/src",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../examples",
+        "to": "backend/examples",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../pyproject.toml",
+        "to": "backend/pyproject.toml"
+      },
+      {
+        "from": "../README.md",
+        "to": "backend/README.md"
+      }
+    ]
+  }
+}

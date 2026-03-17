@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-factory"
+version = "0.1.0"
+description = "Open-source-friendly voice factory scaffold for selectable seed generation, MioTTS dataset generation, SBV2/Piper training, and portable export."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Mugen Research"}]
+dependencies = [
+  "fastapi>=0.115.0",
+  "gradio>=5.21.0",
+  "httpx>=0.28.0",
+  "pydantic>=2.10.0",
+  "uvicorn>=0.34.0",
+]
+
+[project.optional-dependencies]
+voice = [
+  "bitsandbytes>=0.45.0; platform_system != 'Darwin'",
+  "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
+  "numpy>=1.26.0",
+  "qwen-tts>=0.1.1",
+  "soundfile>=0.13.0",
+  "torch>=2.4.0",
+  "transformers>=4.49.0",
+]
+train = [
+  "huggingface_hub>=0.30.0",
+  "librosa>=0.11.0",
+  "numpy>=1.26.0",
+  "onnxruntime>=1.17.0",
+  "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
+  "torch>=2.4.0",
+  "tqdm>=4.66.0",
+]
+dev = [
+  "pytest>=8.3.0",
+  "ruff>=0.11.0",
+]
+
+[project.scripts]
+voice-factory = "voice_factory.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+voice_factory = ["*.json"]

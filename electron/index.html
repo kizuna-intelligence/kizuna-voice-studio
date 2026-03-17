@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Factory</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Preview First Voice Builder</p>
+        <h1>Voice Factory</h1>
+        <p class="lede">
+          まず種音声を作って声の感じを確認し、気に入ったらその声で TTS を作ります。
+        </p>
+        <p id="buildVariantNote" class="build-variant-note hidden"></p>
+      </section>
+
+      <section class="panel main-panel">
+        <div class="workspace-grid">
+          <div class="control-stack">
+            <label>
+              どんな声を作りたいですか
+              <textarea id="voiceDescription" rows="8"></textarea>
+            </label>
+            <div class="fields-row">
+              <label>
+                GPU メモリの大きさ (GB)
+                <input id="gpuMemoryGb" type="number" min="4" step="1" value="16" />
+              </label>
+              <label>
+                種音声の作り方
+                <select id="seedVoiceBackend">
+                  <option value="kizuna">Kizuna Voice Designer</option>
+                  <option value="qwen">Qwen Voice Designer</option>
+                </select>
+                <span id="seedVoiceBackendHint" class="field-hint">日本語をそのまま使う lightweight モードです。</span>
+              </label>
+              <label>
+                実行デバイス
+                <select id="computeTarget"></select>
+                <span id="computeTargetHint" class="field-hint">起動時に CPU か使う GPU を選べます。</span>
+              </label>
+            </div>
+            <div class="button-row preview-row">
+              <button id="previewButton" class="primary-button">1. 種音声を作成</button>
+            </div>
+            <input id="projectId" type="hidden" value="" />
+            <p id="statusLine" class="status-line">最初に「種音声を作成」を押して、声サンプルを確認してください。</p>
+            <section id="progressPanel" class="progress-panel hidden" aria-label="処理の進み具合">
+              <div class="progress-meta">
+                <strong id="progressTitle">進行状況</strong>
+                <span id="progressValue">0%</span>
+              </div>
+              <div class="progress-bar" aria-hidden="true">
+                <div id="progressFill" class="progress-fill"></div>
+              </div>
+            </section>
+          </div>
+          <div class="side-stack">
+            <section class="preview-panel">
+              <div>
+                <h2>声サンプル</h2>
+                <p>ここで声を確認して、問題なければ次にモデルを選んで TTS 作成へ進みます。</p>
+              </div>
+              <audio id="previewAudio" controls preload="none"></audio>
+            </section>
+
+            <section id="modelPanel" class="model-panel locked-panel" aria-label="作るモデル">
+              <div class="model-panel-header">
+                <div>
+                  <p class="section-label">次のステップ</p>
+                  <h2>出力する TTS を選ぶ</h2>
+                </div>
+                <button id="helpButton" type="button" class="ghost-button">ヘルプ</button>
+              </div>
+              <p id="modelPanelLead" class="panel-lead">声サンプルを確認したあとに、ここで作るモデルを選びます。</p>
+              <div class="model-grid">
+                <label class="model-option">
+                  <input type="radio" name="modelFamily" value="piper" checked />
+                  <span class="model-option-copy">
+                    <strong>Piper TTS</strong>
+                    <span>とにかく軽く配布したいとき向け</span>
+                  </span>
+                </label>
+                <label class="model-option">
+                  <input type="radio" name="modelFamily" value="sbv2" />
+                  <span class="model-option-copy">
+                    <strong>Style-Bert-VITS2</strong>
+                    <span>少し表現力を優先したいとき向け</span>
+                  </span>
+                </label>
+              </div>
+              <p id="modelRecommendation" class="recommendation-note hidden"></p>
+              <div class="button-row">
+                <button id="buildTtsButton" class="secondary-button" disabled>2. この声で TTS を作る</button>
+                <a id="downloadButton" class="download-button hidden" href="#" download>完成した Python パッケージをダウンロード</a>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <section class="stage-board" aria-label="進行状況">
+          <article class="stage-card" data-stage-card="preview">
+            <p class="stage-step">1</p>
+            <h2>種音声を作成</h2>
+            <p id="previewStageDescription">選んだ種音声モードで基準となる声を作ります。</p>
+          </article>
+          <article class="stage-card" data-stage-card="dataset">
+            <p class="stage-step">2</p>
+            <h2>学習データセット作成</h2>
+            <p>MioTTS zero-shot で音声バリエーションをまとめて作ります。</p>
+          </article>
+          <article class="stage-card" data-stage-card="training">
+            <p class="stage-step">3</p>
+            <h2>モデル学習</h2>
+            <p id="trainingStageDescription">選んだ形式で学習し、使えるモデルに整えます。</p>
+          </article>
+          <article class="stage-card" data-stage-card="package">
+            <p class="stage-step">4</p>
+            <h2>ダウンロード準備</h2>
+            <p id="packageStageDescription">選んだモデルを `pip install` できる形にまとめます。</p>
+          </article>
+        </section>
+
+      </section>
+
+      <details class="panel details-panel">
+        <summary>詳細設定とログ</summary>
+        <label class="api-box">
+          <span>接続先 API</span>
+          <input id="apiBase" type="text" />
+        </label>
+        <pre id="output"></pre>
+      </details>
+    </main>
+
+    <div id="helpOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="overlay-card">
+        <div class="overlay-header">
+          <div>
+            <p class="section-label">モデルの違い</p>
+            <h2 id="helpTitle">どちらを選べばいいか</h2>
+          </div>
+          <button id="closeHelpButton" type="button" class="ghost-button">閉じる</button>
+        </div>
+        <div class="help-grid">
+          <article class="help-card">
+            <h3>Piper TTS</h3>
+            <p>めちゃくちゃ軽量で、CPU でもかなり低スペックな PC や携帯で動かしやすいです。</p>
+            <p>その代わり、Style-Bert-VITS2 ほどの表現力はありません。</p>
+            <p>低めの男性声は、今の比較だと少し崩れやすいことがありました。</p>
+          </article>
+          <article class="help-card">
+            <h3>Style-Bert-VITS2</h3>
+            <p>多少のスペックは必要ですが、そこそこ速く、Piper より少し表現力が高いです。</p>
+            <p>感情やニュアンスを少し重視したい場合はこちらです。</p>
+            <p>低めの男性声を作るなら、今の比較ではこちらを選ぶ方が安定しやすいです。</p>
+          </article>
+        </div>
+      </div>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
