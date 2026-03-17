@@ -199,8 +199,12 @@ npm run dist:linux-nvidia
 npm run dist:macos-apple-silicon
 ```
 
-ただし、実際の配布運用では GitHub Actions で重い Electron build は回していません。
-配布物は各 OS 上でローカル build し、そのあと GitHub Release にアップロードする想定です。
+ただし、配布運用は次のように分けています。
+
+- `linux-nvidia` はローカル build
+- `windows-nvidia` と `macos-apple-silicon` は GitHub Actions の手動実行でも build 可能
+
+自動で毎回 build はせず、release を切るタイミングだけ手動で回す想定です。
 
 ### ローカルで配布物を作る
 
@@ -210,21 +214,19 @@ npm run dist:macos-apple-silicon
 scripts/build-electron-release.sh --variant linux-nvidia
 ```
 
-```bash
-scripts/build-electron-release.sh --variant windows-nvidia
-```
-
-```bash
-scripts/build-electron-release.sh --variant macos-apple-silicon
-```
-
 生成物は `electron/dist/<variant>/` に出ます。
+
+`windows-nvidia` と `macos-apple-silicon` は、GitHub Actions の
+`Manual Electron Release Builds` を手動実行して artifact を作る運用でも使えます。
 
 ### ローカル build を GitHub Release にアップロードする
 
 ```bash
 scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant linux-nvidia
 ```
+
+Windows と macOS の artifact は、手動 workflow で作ったものをダウンロードしてから
+同じスクリプトで release に上げられます。
 
 ```bash
 scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-nvidia
@@ -247,12 +249,13 @@ npm start
 
 ## GitHub Actions
 
-GitHub Actions では、重い Electron 配布ビルドは回しません。
-代わりに、軽い構文確認だけを行います。
+GitHub Actions では、通常時は軽い構文確認だけを行います。
+重い Electron 配布ビルドは自動では走らせず、必要なときだけ手動で回します。
 
 workflow:
 
 - [.github/workflows/repository-checks.yml](.github/workflows/repository-checks.yml)
+- [.github/workflows/manual-electron-release-builds.yml](.github/workflows/manual-electron-release-builds.yml)
 
 ## ライセンス
 
