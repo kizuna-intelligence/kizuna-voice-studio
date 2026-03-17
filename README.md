@@ -330,6 +330,14 @@ workflow:
 - [.github/workflows/repository-checks.yml](.github/workflows/repository-checks.yml)
 - [.github/workflows/manual-electron-release-builds.yml](.github/workflows/manual-electron-release-builds.yml)
 
+## クレジット
+
+このソフトでは、主に次のプロジェクトや作者の成果を利用しています。
+
+- `Piper TTS / piper-plus`: ayutaz さん
+- `Qwen Voice Designer`: Alibaba / Qwen Team
+- `Style-Bert-VITS2`: litagin さん
+
 ## ライセンス
 
 このリポジトリ自体のライセンスは `Apache License 2.0` です。
@@ -337,7 +345,11 @@ workflow:
 ただし、`Kizuna Voice Designer` を利用する部分、およびそれに由来する機能部分には
 `Kizuna Community License` が適用されます。
 
+また、`Style-Bert-VITS2` を利用する部分は upstream のライセンスに従います。
+この README では分かりやすさのために `GPL 系` とまとめず、`AGPL v3.0` と明記します。
+
 ライセンスの見方は次のとおりです。
 
 - このリポジトリ全体: [LICENSE](LICENSE)
 - `Kizuna Voice Designer` 由来部分: [kizuna-intelligence/kizuna-voice-designer の LICENSE](https://github.com/kizuna-intelligence/kizuna-voice-designer/blob/main/LICENSE)
+- `Style-Bert-VITS2` 由来部分: [litagin02/Style-Bert-VITS2 の LICENSE](https://github.com/litagin02/Style-Bert-VITS2/blob/master/LICENSE)
