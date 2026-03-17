@@ -199,6 +199,43 @@ npm run dist:linux-nvidia
 npm run dist:macos-apple-silicon
 ```
 
+ただし、実際の配布運用では GitHub Actions で重い Electron build は回していません。
+配布物は各 OS 上でローカル build し、そのあと GitHub Release にアップロードする想定です。
+
+### ローカルで配布物を作る
+
+対象 OS 上で次のように実行します。
+
+```bash
+scripts/build-electron-release.sh --variant linux-nvidia
+```
+
+```bash
+scripts/build-electron-release.sh --variant windows-nvidia
+```
+
+```bash
+scripts/build-electron-release.sh --variant macos-apple-silicon
+```
+
+生成物は `electron/dist/<variant>/` に出ます。
+
+### ローカル build を GitHub Release にアップロードする
+
+```bash
+scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant linux-nvidia
+```
+
+```bash
+scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-nvidia
+```
+
+```bash
+scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant macos-apple-silicon
+```
+
+このスクリプトは `aih-gh` を使って release を作成し、同名 asset があれば上書きします。
+
 ### 開発用起動
 
 ```bash
@@ -210,17 +247,12 @@ npm start
 
 ## GitHub Actions
 
-GitHub Actions では Electron 配布物を自動ビルドします。
-
-現在の build 対象:
-
-- `windows-nvidia`
-- `linux-nvidia`
-- `macos-apple-silicon`
+GitHub Actions では、重い Electron 配布ビルドは回しません。
+代わりに、軽い構文確認だけを行います。
 
 workflow:
 
-- [.github/workflows/voice-factory-electron-variants.yml](.github/workflows/voice-factory-electron-variants.yml)
+- [.github/workflows/repository-checks.yml](.github/workflows/repository-checks.yml)
 
 ## ライセンス
 
