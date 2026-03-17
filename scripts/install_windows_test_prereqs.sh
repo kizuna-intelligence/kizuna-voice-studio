@@ -77,7 +77,7 @@ if [[ "$INCLUDE_PYTHON" -eq 1 ]]; then
 fi
 
 PACKAGE_LIST=$(printf "'%s'," "${PACKAGES[@]}")
-PACKAGE_LIST="[${PACKAGE_LIST%,}]"
+PACKAGE_LIST="@(${PACKAGE_LIST%,})"
 
 read -r -d '' POWERSHELL_SCRIPT <<EOF || true
 \$ErrorActionPreference = 'Stop'
