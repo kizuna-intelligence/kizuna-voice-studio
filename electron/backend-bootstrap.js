@@ -145,7 +145,6 @@ function hasBundledWheelhouse(paths) {
     return false;
   }
 }
-
 function commandExists(command) {
   const locator = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(locator, [command], { stdio: "ignore" });
