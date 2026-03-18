@@ -12,9 +12,9 @@ Usage:
   scripts/upload-electron-release-assets.sh --tag <tag> --variant <variant> [--repo owner/name]
 
 Examples:
-  scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant linux-nvidia
-  scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-nvidia
-  scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-amd
+  scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant linux-nvidia
+  scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant windows-nvidia
+  scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant windows-amd
 
 Notes:
   - Build locally first with scripts/build-electron-release.sh.

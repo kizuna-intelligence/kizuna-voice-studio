@@ -313,18 +313,18 @@ scripts/build-electron-release.sh --variant linux-nvidia
 ### ローカル build を GitHub Release にアップロードする
 
 ```bash
-scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant linux-nvidia
+scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant linux-nvidia
 ```
 
 Windows と macOS の artifact は、手動 workflow で作ったものをダウンロードしてから
 同じスクリプトで release に上げられます。
 
 ```bash
-scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant windows-nvidia
+scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant windows-nvidia
 ```
 
 ```bash
-scripts/upload-electron-release-assets.sh --tag v0.1.0 --variant macos-apple-silicon
+scripts/upload-electron-release-assets.sh --tag v0.1.1 --variant macos-apple-silicon
 ```
 
 このスクリプトは `aih-gh` を使って release を作成し、同名 asset があれば上書きします。

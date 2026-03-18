@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kizuna-voice-studio"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop app for creating, previewing, and exporting Japanese TTS voices with Kizuna Voice Designer, Qwen Voice Designer, MioTTS, Piper, and Style-Bert-VITS2."
 readme = "README.md"
 requires-python = ">=3.10"
