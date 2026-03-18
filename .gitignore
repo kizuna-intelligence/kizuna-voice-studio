@@ -3,6 +3,7 @@ GPT_SoVITS/
 node_modules/
 dist/
 vendor/
+wheelhouse/
 .venv/
 .cocoindex_code/
 *.pyc

@@ -79,6 +79,11 @@ chmod +x VoiceFactory-Linux-NVIDIA-<version>.AppImage
 
 そのため、初回だけは少し待ち時間があります。
 
+Windows 配布版では、`jieba-fast` のようなネイティブ拡張は
+初回起動時に手元の PC でビルドしない方針です。
+配布物の build 時点で必要な wheel を同梱し、初回セットアップでは
+そのローカル wheel を優先して使います。
+
 ## できること
 
 - 日本語の説明から種音声を作る

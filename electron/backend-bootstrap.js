@@ -5,9 +5,10 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const MANAGED_PYTHON_VERSION = process.env.VOICE_FACTORY_MANAGED_PYTHON_VERSION || "3.11";
-const BOOTSTRAP_SCHEMA_VERSION = 6;
+const BOOTSTRAP_SCHEMA_VERSION = 7;
 const NVIDIA_TORCH_INDEX_URL =
   process.env.VOICE_FACTORY_TORCH_INDEX_URL || "https://download.pytorch.org/whl/cu130";
+const WINDOWS_BUNDLED_WHEEL_REQUIREMENTS = ["jieba-fast==0.53"];
 const COMMON_PACKAGES = [
   "fastapi>=0.115.0",
   "gradio>=5.21.0",
@@ -69,6 +70,7 @@ function managedPaths(app, backendProfile) {
   const bootstrapDir = path.join(stateRoot, "bootstrap");
   const packageRuntimeDir = path.join(stateRoot, "package-runtimes");
   const metaPath = path.join(bootstrapDir, "backend-meta.json");
+  const bundledWheelhouseDir = path.join(backendRootForResources(), "wheelhouse");
   const uvBinary =
     process.platform === "win32" ? path.join(uvInstallDir, "uv.exe") : path.join(uvInstallDir, "uv");
   const pythonBinary =
@@ -93,6 +95,7 @@ function managedPaths(app, backendProfile) {
     bootstrapDir,
     packageRuntimeDir,
     metaPath,
+    bundledWheelhouseDir,
     uvBinary,
     pythonBinary,
     packageRuntimePython: {
@@ -106,6 +109,13 @@ function managedPaths(app, backendProfile) {
       miotts: runtimeVenvDir("miotts"),
     },
   };
+}
+
+function backendRootForResources() {
+  if (process.resourcesPath && fs.existsSync(path.join(process.resourcesPath, "backend"))) {
+    return path.join(process.resourcesPath, "backend");
+  }
+  return path.join(__dirname, "..");
 }
 
 function ensureDir(targetPath) {
@@ -123,6 +133,17 @@ function resetManagedRuntime(paths) {
   fs.rmSync(paths.bootstrapDir, { recursive: true, force: true });
 }
 
+function hasBundledWheelhouse(paths) {
+  if (!fs.existsSync(paths.bundledWheelhouseDir)) {
+    return false;
+  }
+  try {
+    return fs.readdirSync(paths.bundledWheelhouseDir).some((name) => name.endsWith(".whl"));
+  } catch (error) {
+    return false;
+  }
+}
+
 function commandExists(command) {
   const locator = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(locator, [command], { stdio: "ignore" });
@@ -138,6 +159,14 @@ function runChecked(command, args, options = {}) {
     throw new Error(result.stderr || result.stdout || `${command} exited with status ${result.status}`);
   }
   return result;
+}
+
+function pipInstallArgs(pythonBinary, paths, packages, extraArgs = []) {
+  const args = ["pip", "install", "--python", pythonBinary];
+  if (hasBundledWheelhouse(paths)) {
+    args.push("--find-links", paths.bundledWheelhouseDir);
+  }
+  return [...args, ...extraArgs, ...packages];
 }
 
 function downloadFile(url, destination) {
@@ -254,7 +283,23 @@ function backendEnv(paths, backendRoot, backendProfile, defaultComputeTarget, cu
 function installRuntimePackages(uvCommand, pythonBinary, packages, backendRoot, uvEnv) {
   runChecked(
     uvCommand,
-    ["pip", "install", "--python", pythonBinary, ...packages],
+    pipInstallArgs(pythonBinary, { bundledWheelhouseDir: path.join(backendRootForResources(), "wheelhouse") }, packages),
+    { env: uvEnv, cwd: backendRoot }
+  );
+}
+
+function installBundledBootstrapWheels(uvCommand, pythonBinary, paths, backendRoot, uvEnv) {
+  if (!hasBundledWheelhouse(paths)) {
+    return;
+  }
+  runChecked(
+    uvCommand,
+    pipInstallArgs(
+      pythonBinary,
+      paths,
+      WINDOWS_BUNDLED_WHEEL_REQUIREMENTS,
+      ["--no-index", "--force-reinstall"]
+    ),
     { env: uvEnv, cwd: backendRoot }
   );
 }
@@ -305,21 +350,14 @@ function installPackageRuntimeEnvironments(uvCommand, paths, backendRoot, backen
           { env: uvEnv, cwd: backendRoot }
         );
       } else {
-        runChecked(
-          uvCommand,
-          ["pip", "install", "--python", pythonBinary, "torch>=2.4.0"],
-          { env: uvEnv, cwd: backendRoot }
-        );
+      runChecked(uvCommand, pipInstallArgs(pythonBinary, paths, ["torch>=2.4.0"]), {
+        env: uvEnv,
+        cwd: backendRoot,
+      });
       }
     }
 
-    installRuntimePackages(
-      uvCommand,
-      pythonBinary,
-      PACKAGE_RUNTIME_PACKAGES[runtimeName],
-      backendRoot,
-      uvEnv
-    );
+    installRuntimePackages(uvCommand, pythonBinary, PACKAGE_RUNTIME_PACKAGES[runtimeName], backendRoot, uvEnv);
 
     if (runtimeName === "sbv2") {
       prefetchSbv2JapaneseBert(pythonBinary, backendRoot, uvEnv);
@@ -338,6 +376,7 @@ function installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile,
   };
   runChecked(uvCommand, ["venv", paths.venvDir, "--python", MANAGED_PYTHON_VERSION], { env: uvEnv });
   runChecked(paths.pythonBinary, ["-m", "ensurepip", "--upgrade"], { env: uvEnv, cwd: backendRoot });
+  installBundledBootstrapWheels(uvCommand, paths.pythonBinary, paths, backendRoot, uvEnv);
 
   if (backendProfile === "nvidia") {
     runChecked(
@@ -369,7 +408,7 @@ function installPythonEnvironment(uvCommand, paths, backendRoot, backendProfile,
 
   runChecked(
     uvCommand,
-    ["pip", "install", "--python", paths.pythonBinary, ...packagesForProfile(backendProfile)],
+    pipInstallArgs(paths.pythonBinary, paths, packagesForProfile(backendProfile)),
     { env: uvEnv, cwd: backendRoot }
   );
   runChecked(
