@@ -1,8 +1,10 @@
 param(
   [string]$RepoRoot = "$env:USERPROFILE\Desktop\kvs-src",
   [string]$StateRoot = "C:\kvs-amd-test",
-  [string]$RuntimeRoot = "$env:APPDATA\voice-factory-electron-amd-test\managed-backend\amd",
+  [string]$RuntimeRoot = "",
   [string]$StyleInstruction = "Calm female narration voice. Natural, clear, and suitable for reading aloud.",
+  [ValidateSet("kizuna", "qwen")]
+  [string]$SeedVoiceBackend = "kizuna",
   [int]$Port = 7861,
   [int]$PreviewTimeoutSeconds = 900,
   [switch]$RunBuildTts,
@@ -33,6 +35,9 @@ Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Ob
 }
 
 $managedRoot = Join-Path $StateRoot "amd"
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = $managedRoot
+}
 $python = Join-Path $RuntimeRoot "runtime\venv\Scripts\python.exe"
 $workspaceRoot = Join-Path $managedRoot "workspace"
 $cacheRoot = Join-Path $managedRoot "cache"
@@ -62,23 +67,6 @@ $env:VOICE_FACTORY_PIPER_DISABLE_WAVLM = "1"
 $stdoutLog = Join-Path $logDir "stdout.log"
 $stderrLog = Join-Path $logDir "stderr.log"
 
-$trainingDepsReady = $false
-try {
-  & $python -c "import pyopenjtalk, pytorch_lightning, torchmetrics, tensorboard" 2>$null
-  $trainingDepsReady = ($LASTEXITCODE -eq 0)
-} catch {
-  $trainingDepsReady = $false
-}
-
-if (-not $trainingDepsReady) {
-  & $python -m pip install `
-    pyopenjtalk `
-    pytorch-lightning==2.6.1 `
-    tensorboard==2.20.0 `
-    torchmetrics==1.9.0 `
-    "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python"
-}
-
 Start-Process `
   -FilePath $python `
   -ArgumentList "-m", "uvicorn", "voice_factory.server:app", "--host", "127.0.0.1", "--port", "$Port" `
@@ -94,7 +82,7 @@ $requestBody = @{
   style_instruction = $StyleInstruction
   gpu_memory_gb = 16
   model_family = "piper"
-  seed_voice_backend = "qwen"
+  seed_voice_backend = $SeedVoiceBackend
   compute_target = "cpu"
 } | ConvertTo-Json
 
