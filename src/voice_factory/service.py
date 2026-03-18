@@ -10,6 +10,7 @@ import subprocess
 import sys
 import traceback
 import wave
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1106,6 +1107,15 @@ class VoiceFactoryService:
             / "fast_langdetect"
         ).mkdir(parents=True, exist_ok=True)
 
+    @contextmanager
+    def _temporary_cwd(self, target: Path):
+        original_cwd = Path.cwd()
+        os.chdir(target)
+        try:
+            yield
+        finally:
+            os.chdir(original_cwd)
+
     def generate_preview(
         self,
         project_id: str,
@@ -1148,11 +1158,12 @@ class VoiceFactoryService:
             )
             if status_callback:
                 status_callback("種音声を生成中です")
-            audio, sample_rate, embedding = voice_designer.generate(
-                prompt=spec.style_instruction,
-                text=spec.seed_text,
-                lang="all_ja",
-            )
+            with self._temporary_cwd(VOICE_DESIGNER_CACHE_DIR):
+                audio, sample_rate, embedding = voice_designer.generate(
+                    prompt=spec.style_instruction,
+                    text=spec.seed_text,
+                    lang="all_ja",
+                )
             embedding_path = paths.preview_dir / "reference_embedding.npy"
             voice_designer.save(str(reference_path), audio, sample_rate)
             voice_designer.save_embedding(str(embedding_path), embedding)

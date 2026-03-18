@@ -35,9 +35,10 @@ def build_tts_ui(project_id: str, mio_base_url: str, model_family: str) -> str:
 
 def project_status_ui(project_id: str) -> tuple[str | None, str]:
     payload = service.describe_project(project_id)
+    preview = payload.get("preview") or {}
     preview_path = None
-    if payload.get("preview", {}).get("reference_wav"):
-        preview_path = payload["preview"]["reference_wav"]
+    if preview.get("reference_wav"):
+        preview_path = preview["reference_wav"]
     return preview_path, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
