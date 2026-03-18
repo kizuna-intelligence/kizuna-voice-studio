@@ -5,7 +5,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const MANAGED_PYTHON_VERSION = process.env.VOICE_FACTORY_MANAGED_PYTHON_VERSION || "3.11";
-const BOOTSTRAP_SCHEMA_VERSION = 4;
+const BOOTSTRAP_SCHEMA_VERSION = 6;
 const NVIDIA_TORCH_INDEX_URL =
   process.env.VOICE_FACTORY_TORCH_INDEX_URL || "https://download.pytorch.org/whl/cu130";
 const COMMON_PACKAGES = [
@@ -17,10 +17,14 @@ const COMMON_PACKAGES = [
   "numpy>=1.26.0",
   "onnxruntime>=1.17.0",
   "pydantic>=2.10.0",
+  "pyopenjtalk>=0.4.1",
+  "pytorch-lightning==2.6.1",
   "qwen-tts>=0.1.1",
   "soundfile>=0.13.0",
+  "tensorboard==2.20.0",
   "tqdm>=4.66.0",
   "transformers>=4.49.0,<5",
+  "torchmetrics==1.9.0",
   "uvicorn>=0.34.0",
   "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
 ];
@@ -49,7 +53,12 @@ const PACKAGE_RUNTIME_PACKAGES = {
 
 function managedPaths(app, backendProfile) {
   const userDataRoot = app.getPath("userData");
-  const stateRoot = path.join(userDataRoot, "managed-backend", backendProfile);
+  const managedStateRoot =
+    process.env.VOICE_FACTORY_MANAGED_STATE_ROOT ||
+    (process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA || app.getPath("appData"), "KizunaVoiceStudio")
+      : path.join(userDataRoot, "managed-backend"));
+  const stateRoot = path.join(managedStateRoot, backendProfile);
   const uvInstallDir = path.join(stateRoot, "tools", "uv");
   const uvCacheDir = path.join(stateRoot, "tools", "uv-cache");
   const pythonInstallDir = path.join(stateRoot, "python");

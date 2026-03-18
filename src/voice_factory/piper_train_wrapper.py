@@ -5,6 +5,7 @@ import sys
 import types
 import importlib.machinery
 import importlib.util
+from pathlib import Path
 
 
 def main() -> None:
@@ -48,6 +49,7 @@ def main() -> None:
     )
 
     original_wavlm_init = WavLMDiscriminator.__init__
+    original_load_state_dict = VitsModel.load_state_dict
 
     def patched_wavlm_init(self, *args, **kwargs):
         original_wavlm_init(self, *args, **kwargs)
@@ -58,6 +60,25 @@ def main() -> None:
             feature_extractor._freeze_parameters()
 
     WavLMDiscriminator.__init__ = patched_wavlm_init
+
+    def patched_load_state_dict(self, state_dict, strict=True, assign=False):
+        if not strict:
+            current_state = self.state_dict()
+            filtered_state_dict = {}
+            for key, value in state_dict.items():
+                current_value = current_state.get(key)
+                if (
+                    current_value is not None
+                    and hasattr(value, "shape")
+                    and hasattr(current_value, "shape")
+                    and tuple(value.shape) != tuple(current_value.shape)
+                ):
+                    continue
+                filtered_state_dict[key] = value
+            state_dict = filtered_state_dict
+        return original_load_state_dict(self, state_dict, strict=strict, assign=assign)
+
+    VitsModel.load_state_dict = patched_load_state_dict
 
     piper_main.WANDB_AVAILABLE = False
 
@@ -76,7 +97,32 @@ def main() -> None:
         if "--c-wavlm" not in sys.argv:
             sys.argv.extend(["--c-wavlm", "0.0"])
 
-    piper_main.main()
+    default_root_dir = None
+    if "--default_root_dir" in sys.argv:
+        index = sys.argv.index("--default_root_dir")
+        if index + 1 < len(sys.argv):
+            default_root_dir = Path(sys.argv[index + 1]).expanduser()
+
+    try:
+        piper_main.main()
+    except UnicodeEncodeError as error:
+        checkpoints_dir = (
+            default_root_dir / "lightning_logs"
+            if default_root_dir is not None
+            else None
+        )
+        last_checkpoint = None
+        if checkpoints_dir and checkpoints_dir.exists():
+            candidates = sorted(checkpoints_dir.glob("version_*/checkpoints/last.ckpt"))
+            if candidates:
+                last_checkpoint = candidates[-1]
+        if last_checkpoint is not None:
+            print(
+                f"warning: ignoring console encoding error after checkpoint save: {error}",
+                file=sys.stderr,
+            )
+            return
+        raise
 
 
 if __name__ == "__main__":
