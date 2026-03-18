@@ -134,14 +134,8 @@ function selectedSeedVoiceBackend() {
 }
 
 function configureSeedVoiceBackendOptions() {
-  const isAmdBuild = buildInfo.backendProfile === "amd";
-  const kizunaOption = Array.from(seedVoiceBackendSelect.options).find((option) => option.value === "kizuna");
-  if (kizunaOption) {
-    kizunaOption.disabled = isAmdBuild;
-    kizunaOption.hidden = isAmdBuild;
-  }
-  if (isAmdBuild) {
-    seedVoiceBackendSelect.value = "qwen";
+  if (!seedVoiceBackendSelect.value) {
+    seedVoiceBackendSelect.value = "kizuna";
   }
   updateSeedVoiceBackendCopy();
 }
@@ -154,7 +148,7 @@ function buildVariantSummary(info) {
     return `この配布版は NVIDIA GPU 向けです。CUDA は新しい系統のみを対象にしています。初回起動時は必要な Python 環境を自動で準備し、既定の実行先は ${info.defaultComputeTarget.toUpperCase()} です。`;
   }
   if (info.backendProfile === "amd") {
-    return "この配布版は AMD / 非NVIDIA 環境向けです。まずは Qwen Voice Designer と互換実行経路を使って動作確認します。";
+    return "この配布版は AMD / 非NVIDIA 環境向けです。種音声は Kizuna Voice Designer と Qwen Voice Designer の両方を選べます。";
   }
   if (info.backendProfile === "cpu") {
     return "この配布版は CPU 専用です。初回起動時に必要な Python 環境を自動で準備し、GPU 学習や GPU 推論は含めません。";

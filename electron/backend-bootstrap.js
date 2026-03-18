@@ -5,7 +5,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const MANAGED_PYTHON_VERSION = process.env.VOICE_FACTORY_MANAGED_PYTHON_VERSION || "3.11";
-const BOOTSTRAP_SCHEMA_VERSION = 7;
+const BOOTSTRAP_SCHEMA_VERSION = 8;
 const NVIDIA_TORCH_INDEX_URL =
   process.env.VOICE_FACTORY_TORCH_INDEX_URL || "https://download.pytorch.org/whl/cu130";
 const WINDOWS_BUNDLED_WHEEL_REQUIREMENTS = ["jieba-fast==0.53"];
@@ -19,13 +19,10 @@ const COMMON_PACKAGES = [
   "onnxruntime>=1.17.0",
   "pydantic>=2.10.0",
   "pyopenjtalk>=0.4.1",
-  "pytorch-lightning==2.6.1",
   "qwen-tts>=0.1.1",
   "soundfile>=0.13.0",
-  "tensorboard==2.20.0",
   "tqdm>=4.66.0",
   "transformers>=4.49.0,<5",
-  "torchmetrics==1.9.0",
   "uvicorn>=0.34.0",
   "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
 ];
@@ -33,7 +30,9 @@ const PROFILE_PACKAGES = {
   default: [
     "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
   ],
-  amd: [],
+  amd: [
+    "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
+  ],
 };
 const PACKAGE_RUNTIME_PACKAGES = {
   piper: [
@@ -41,6 +40,9 @@ const PACKAGE_RUNTIME_PACKAGES = {
     "onnxruntime>=1.17.0",
     "pyopenjtalk>=0.4.1",
     "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
+    "pytorch-lightning==2.6.1",
+    "tensorboard==2.20.0",
+    "torchmetrics==1.9.0",
   ],
   sbv2: [
     "setuptools>=68,<81",
