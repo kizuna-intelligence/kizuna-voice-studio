@@ -4,6 +4,7 @@ import audioop
 import importlib.util
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -1452,7 +1453,7 @@ class VoiceFactoryService:
             "--base_lr",
             str(fine_tune_base_lr),
             "--precision",
-            str(base_hparams.get("precision", "16-mixed") if use_gpu else "32"),
+            str(base_hparams.get("precision", "16-mixed") if use_gpu else "32-true"),
             "--max_epochs",
             str(max_epochs),
             "--default_root_dir",
@@ -1655,7 +1656,15 @@ class VoiceFactoryService:
 
     def _load_piper_base_hparams(self, project_id: str) -> dict[str, Any]:
         checkpoint_path = self._ensure_piper_base_checkpoint(project_id)
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        if os.name == "nt":
+            original_posix_path = pathlib.PosixPath
+            pathlib.PosixPath = pathlib.WindowsPath
+            try:
+                checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            finally:
+                pathlib.PosixPath = original_posix_path
+        else:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         hparams = dict(checkpoint.get("hyper_parameters", {}))
         state_dict = checkpoint.get("state_dict", {})
 
@@ -1777,7 +1786,8 @@ class VoiceFactoryService:
             + "\n",
             encoding="utf-8",
         )
-        subprocess.run(["chmod", "+x", str(piper_script), str(sbv2_script)], check=False)
+        if os.name != "nt":
+            subprocess.run(["chmod", "+x", str(piper_script), str(sbv2_script)], check=False)
         return {
             "piper_script": str(piper_script),
             "sbv2_script": str(sbv2_script),
@@ -2002,6 +2012,7 @@ class VoiceFactoryService:
                     "dependencies = [",
                     '  "numpy>=1.26.0,<2",',
                     '  "onnxruntime>=1.17.0",',
+                    '  "pyopenjtalk>=0.4.1",',
                     '  "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",',
                     "]",
                     "",

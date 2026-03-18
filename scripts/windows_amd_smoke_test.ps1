@@ -1,6 +1,7 @@
 param(
-  [string]$RepoRoot = "C:\Users\Yusuke\Desktop\kvs-src",
-  [string]$StateRoot = "C:\Users\Yusuke\AppData\Roaming\voice-factory-electron-amd-test",
+  [string]$RepoRoot = "$env:USERPROFILE\Desktop\kvs-src",
+  [string]$StateRoot = "C:\kvs-amd-test",
+  [string]$RuntimeRoot = "$env:APPDATA\voice-factory-electron-amd-test\managed-backend\amd",
   [string]$StyleInstruction = "Calm female narration voice. Natural, clear, and suitable for reading aloud.",
   [int]$Port = 7861,
   [int]$PreviewTimeoutSeconds = 900,
@@ -31,21 +32,23 @@ Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Ob
   Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
-$python = Join-Path $StateRoot "managed-backend\amd\runtime\venv\Scripts\python.exe"
-$workspaceRoot = Join-Path $StateRoot "managed-backend\amd\workspace"
-$cacheRoot = Join-Path $StateRoot "managed-backend\amd\cache"
-$logDir = "C:\Users\Yusuke\Desktop\kvs-logs-amd"
+$managedRoot = Join-Path $StateRoot "amd"
+$python = Join-Path $RuntimeRoot "runtime\venv\Scripts\python.exe"
+$workspaceRoot = Join-Path $managedRoot "workspace"
+$cacheRoot = Join-Path $managedRoot "cache"
+$logDir = Join-Path $env:USERPROFILE "Desktop\kvs-logs-amd"
 
 New-Item -ItemType Directory -Force $logDir | Out-Null
 
 $env:PYTHONPATH = (Join-Path $RepoRoot "src")
 $env:VOICE_FACTORY_WORKSPACE_ROOT = $workspaceRoot
+$env:VOICE_FACTORY_MANAGED_STATE_ROOT = $StateRoot
 $env:VOICE_FACTORY_BACKEND_PROFILE = "amd"
 $env:VOICE_FACTORY_DEFAULT_COMPUTE_TARGET = "cpu"
 $env:VOICE_FACTORY_CUDA_CHANNEL = "none"
-$env:VOICE_FACTORY_PIPER_RUNTIME_PYTHON = (Join-Path $StateRoot "managed-backend\amd\package-runtimes\piper\venv\Scripts\python.exe")
-$env:VOICE_FACTORY_SBV2_RUNTIME_PYTHON = (Join-Path $StateRoot "managed-backend\amd\package-runtimes\sbv2\venv\Scripts\python.exe")
-$env:VOICE_FACTORY_MIOTTS_RUNTIME_PYTHON = (Join-Path $StateRoot "managed-backend\amd\package-runtimes\miotts\venv\Scripts\python.exe")
+$env:VOICE_FACTORY_PIPER_RUNTIME_PYTHON = (Join-Path $RuntimeRoot "package-runtimes\piper\venv\Scripts\python.exe")
+$env:VOICE_FACTORY_SBV2_RUNTIME_PYTHON = (Join-Path $RuntimeRoot "package-runtimes\sbv2\venv\Scripts\python.exe")
+$env:VOICE_FACTORY_MIOTTS_RUNTIME_PYTHON = (Join-Path $RuntimeRoot "package-runtimes\miotts\venv\Scripts\python.exe")
 $env:HF_HOME = (Join-Path $cacheRoot "huggingface")
 $env:TORCH_HOME = (Join-Path $cacheRoot "torch")
 $env:XDG_CACHE_HOME = $cacheRoot
@@ -58,6 +61,23 @@ $env:VOICE_FACTORY_PIPER_DISABLE_WAVLM = "1"
 
 $stdoutLog = Join-Path $logDir "stdout.log"
 $stderrLog = Join-Path $logDir "stderr.log"
+
+$trainingDepsReady = $false
+try {
+  & $python -c "import pyopenjtalk, pytorch_lightning, torchmetrics, tensorboard" 2>$null
+  $trainingDepsReady = ($LASTEXITCODE -eq 0)
+} catch {
+  $trainingDepsReady = $false
+}
+
+if (-not $trainingDepsReady) {
+  & $python -m pip install `
+    pyopenjtalk `
+    pytorch-lightning==2.6.1 `
+    tensorboard==2.20.0 `
+    torchmetrics==1.9.0 `
+    "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python"
+}
 
 Start-Process `
   -FilePath $python `

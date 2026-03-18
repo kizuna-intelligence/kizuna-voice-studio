@@ -5,8 +5,8 @@ set -euo pipefail
 # This script runs from Linux/macOS and installs packages on the target Windows
 # machine over SSH by invoking winget via PowerShell.
 
-TARGET_USER="Yusuke"
-TARGET_HOST="192.168.1.16"
+TARGET_USER="${USER:-windows-user}"
+TARGET_HOST="windows-host"
 INCLUDE_PYTHON=0
 AMD_PROFILE=0
 
@@ -16,10 +16,9 @@ Usage:
   install_windows_test_prereqs.sh [--with-python] [--amd] [user] [host]
 
 Examples:
-  install_windows_test_prereqs.sh
-  install_windows_test_prereqs.sh Yusuke 192.168.1.16
-  install_windows_test_prereqs.sh --with-python Yusuke 192.168.1.16
-  install_windows_test_prereqs.sh --amd Yusuke 192.168.1.16
+  install_windows_test_prereqs.sh your-user 192.168.1.10
+  install_windows_test_prereqs.sh --with-python your-user 192.168.1.10
+  install_windows_test_prereqs.sh --amd your-user 192.168.1.10
 
 Default packages:
   - Git.Git
