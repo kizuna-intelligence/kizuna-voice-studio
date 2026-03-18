@@ -10,6 +10,7 @@ import subprocess
 import sys
 import traceback
 import wave
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1088,8 +1089,16 @@ class VoiceFactoryService:
         flow_model = VOICE_DESIGNER_CACHE_DIR / "models" / "flow" / "best_model.pt"
         gpt_entry = VOICE_DESIGNER_CACHE_DIR / "GPT-SoVITS" / "GPT_SoVITS" / "TTS_infer_pack" / "TTS.py"
         pretrained = VOICE_DESIGNER_CACHE_DIR / "GPT-SoVITS" / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
+        sv_checkpoint = (
+            VOICE_DESIGNER_CACHE_DIR
+            / "GPT-SoVITS"
+            / "GPT_SoVITS"
+            / "pretrained_models"
+            / "sv"
+            / "pretrained_eres2netv2w24s4ep4.ckpt"
+        )
         gguf_cached = self._is_hf_file_cached(spec.seed_voice_gguf_model, spec.seed_voice_gguf_file)
-        return flow_model.exists() and gpt_entry.exists() and pretrained.exists() and gguf_cached
+        return flow_model.exists() and gpt_entry.exists() and pretrained.exists() and sv_checkpoint.exists() and gguf_cached
 
     def _seed_voice_backend_ready(self, spec: VoiceProjectSpec) -> bool:
         if spec.seed_voice_backend == "kizuna":
@@ -1105,6 +1114,49 @@ class VoiceFactoryService:
             / "pretrained_models"
             / "fast_langdetect"
         ).mkdir(parents=True, exist_ok=True)
+
+    def _ensure_voice_designer_pretrained_assets(self) -> None:
+        try:
+            from kizuna_voice_designer.downloader import (
+                ensure_flow_model,
+                ensure_gpt_sovits,
+                ensure_pretrained_models,
+            )
+        except ImportError:
+            return
+
+        ensure_gpt_sovits()
+        ensure_flow_model()
+        pretrained_root = ensure_pretrained_models()
+        required_hubert_files = [
+            "chinese-hubert-base/config.json",
+            "chinese-hubert-base/preprocessor_config.json",
+            "chinese-hubert-base/pytorch_model.bin",
+        ]
+        for filename in required_hubert_files:
+            target = pretrained_root / filename
+            if not target.exists():
+                hf_hub_download(
+                    "lj1995/GPT-SoVITS",
+                    filename,
+                    local_dir=str(pretrained_root),
+                )
+        sv_checkpoint = pretrained_root / "sv" / "pretrained_eres2netv2w24s4ep4.ckpt"
+        if not sv_checkpoint.exists():
+            hf_hub_download(
+                "lj1995/GPT-SoVITS",
+                "sv/pretrained_eres2netv2w24s4ep4.ckpt",
+                local_dir=str(pretrained_root),
+            )
+
+    @contextmanager
+    def _temporary_cwd(self, target: Path):
+        original_cwd = Path.cwd()
+        os.chdir(target)
+        try:
+            yield
+        finally:
+            os.chdir(original_cwd)
 
     def generate_preview(
         self,
@@ -1140,6 +1192,7 @@ class VoiceFactoryService:
                 ) from exc
 
             self._ensure_voice_designer_runtime_dirs()
+            self._ensure_voice_designer_pretrained_assets()
             voice_designer = VoiceDesigner(
                 device=resolved_device,
                 embedding_mode=spec.seed_voice_embedding_mode,
@@ -1148,11 +1201,12 @@ class VoiceFactoryService:
             )
             if status_callback:
                 status_callback("種音声を生成中です")
-            audio, sample_rate, embedding = voice_designer.generate(
-                prompt=spec.style_instruction,
-                text=spec.seed_text,
-                lang="all_ja",
-            )
+            with self._temporary_cwd(VOICE_DESIGNER_CACHE_DIR):
+                audio, sample_rate, embedding = voice_designer.generate(
+                    prompt=spec.style_instruction,
+                    text=spec.seed_text,
+                    lang="all_ja",
+                )
             embedding_path = paths.preview_dir / "reference_embedding.npy"
             voice_designer.save(str(reference_path), audio, sample_rate)
             voice_designer.save_embedding(str(embedding_path), embedding)

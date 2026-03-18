@@ -32,6 +32,19 @@ const backendResources = [
   },
 ];
 
+function variantResources(variant) {
+  const resources = [...backendResources];
+  const wheelhouseDir = path.join("wheelhouse", variant.key);
+  if (variant.platform === "win") {
+    resources.push({
+      from: wheelhouseDir,
+      to: path.join("backend", "wheelhouse"),
+      filter: ["**/*"],
+    });
+  }
+  return resources;
+}
+
 const variants = {
   "windows-nvidia": {
     key: "windows-nvidia",
@@ -105,7 +118,7 @@ function builderConfig(variant) {
       voiceFactoryDefaultComputeTarget: variant.defaultComputeTarget,
       voiceFactoryCudaChannel: variant.cudaChannel || "none",
     },
-    extraResources: backendResources,
+    extraResources: variantResources(variant),
     mac: {
       target: ["dmg", "zip"],
       artifactName: variant.artifactName,
