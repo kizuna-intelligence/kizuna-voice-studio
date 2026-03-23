@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kizuna-voice-studio"
 version = "0.1.1"
-description = "Desktop app for creating, previewing, and exporting Japanese TTS voices with Kizuna Voice Designer, Qwen Voice Designer, MioTTS, Piper, and Style-Bert-VITS2."
+description = "Desktop app for creating, previewing, and exporting Japanese TTS voices with Kizuna Voice Designer, Qwen Voice Designer, MioTTS, Irodori-TTS, Piper, and Style-Bert-VITS2."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Mugen Research"}]
@@ -26,15 +26,22 @@ voice = [
   "qwen-tts>=0.1.1",
   "soundfile>=0.13.0",
   "torch>=2.4.0",
-  "transformers>=4.49.0",
+  "transformers>=4.49.0,<5",
 ]
 train = [
+  "LavaSR @ git+https://github.com/ysharma3501/LavaSR.git",
   "huggingface_hub>=0.30.0",
   "librosa>=0.11.0",
   "numpy>=1.26.0",
+  "onnx==1.17.0",
+  "onnxsim==0.4.36",
   "onnxruntime>=1.17.0",
   "piper-train @ https://github.com/ayutaz/piper-plus/archive/refs/heads/dev.zip#subdirectory=src/python",
+  "soundfile>=0.13.0",
+  "tensorboard==2.20.0",
   "torch>=2.4.0",
+  "torchaudio>=2.4.0",
+  "transformers>=4.49.0,<5",
   "tqdm>=4.66.0",
 ]
 dev = [

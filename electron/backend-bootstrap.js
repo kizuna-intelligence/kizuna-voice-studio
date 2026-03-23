@@ -5,7 +5,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const MANAGED_PYTHON_VERSION = process.env.VOICE_FACTORY_MANAGED_PYTHON_VERSION || "3.11";
-const BOOTSTRAP_SCHEMA_VERSION = 8;
+const BOOTSTRAP_SCHEMA_VERSION = 10;
 const NVIDIA_TORCH_INDEX_URL =
   process.env.VOICE_FACTORY_TORCH_INDEX_URL || "https://download.pytorch.org/whl/cu130";
 const WINDOWS_BUNDLED_WHEEL_REQUIREMENTS = ["jieba-fast==0.53"];
@@ -14,13 +14,17 @@ const COMMON_PACKAGES = [
   "gradio>=5.21.0",
   "httpx>=0.28.0",
   "huggingface_hub>=0.30.0",
+  "LavaSR @ git+https://github.com/ysharma3501/LavaSR.git",
   "librosa==0.10.2",
   "numpy>=1.26.0",
+  "onnx==1.17.0",
+  "onnxsim==0.4.36",
   "onnxruntime>=1.17.0",
   "pydantic>=2.10.0",
   "pyopenjtalk>=0.4.1",
   "qwen-tts>=0.1.1",
   "soundfile>=0.13.0",
+  "tensorboard==2.20.0",
   "tqdm>=4.66.0",
   "transformers>=4.49.0,<5",
   "uvicorn>=0.34.0",
@@ -32,6 +36,7 @@ const PROFILE_PACKAGES = {
   ],
   amd: [
     "kizuna-voice-designer[gguf] @ git+https://github.com/kizuna-intelligence/kizuna-voice-designer.git",
+    "torch-directml",
   ],
 };
 const PACKAGE_RUNTIME_PACKAGES = {
@@ -278,6 +283,9 @@ function backendEnv(paths, backendRoot, backendProfile, defaultComputeTarget, cu
     WANDB_DISABLED: "true",
     WANDB_SILENT: "true",
   };
+  if (backendProfile === "amd") {
+    env.VOICE_FACTORY_SBV2_USE_DIRECTML = "1";
+  }
   return env;
 }
 

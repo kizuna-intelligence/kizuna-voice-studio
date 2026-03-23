@@ -239,9 +239,9 @@ voice.synthesize_to_file("こんにちは", "sample.wav")
 
 `Style-Bert-VITS2` でも同様に installable package を作れます。
 
-### 学習なしで使う MioTTS パッケージ
+### 学習なしで使う MioTTS / Irodori-TTS パッケージ
 
-種音声を作ったあと、その `reference.wav` を同封した `MioTTS` 用 zip を作れます。
+種音声を作ったあと、複数の参照音声を同封した `MioTTS` / `Irodori-TTS` 用 zip を作れます。
 
 この zip は `pip install` すると、参照音声つきの voice module として使えます。
 学習済みモデルそのものを同封するのではなく、`MioTTS` の zero-shot API に参照音声を渡して音声生成します。
@@ -256,10 +256,70 @@ from miotts_reference_voice import load_voice
 
 voice = load_voice()
 voice.save_wav("こんにちは。よろしくお願いします。", "sample.wav")
+print(voice.available_references)
+voice.save_wav("別の参照音声で読み上げます。", "sample-alt.wav", reference_audio_name=voice.available_references[-1])
 ```
 
 `MioTTS` のモデルは、現行の既定では `Aratako/MioTTS-1.7B` を使います。
 手元で API を立てている場合は、`api_base_url` を差し替えて使えます。
+
+`Irodori-TTS` package も同様に `reference_audio_name` で参照音声を切り替えられます。
+
+## Python module として使う
+
+backend は `voice_factory` module として import できます。
+薄い facade は `VoiceFactory` です。
+
+```python
+from pathlib import Path
+
+from voice_factory import VoiceFactory, VoiceFactoryConfig
+
+factory = VoiceFactory(
+    VoiceFactoryConfig(workspace_root=Path("./workspace"))
+)
+
+factory.build_miotts_package(
+    "voice-20260317022620-20",
+    reference_audio_paths=[
+        Path("artifacts/voice_preview/reference.wav"),
+        Path("artifacts/voice_preview/reference.original.wav"),
+    ],
+)
+```
+
+module 側で複数参照音声を package に入れられるのは、現時点では `MioTTS` と `Irodori-TTS` です。
+GUI 側の複数参照入力は後続対応です。
+
+複数の声を使い分けるアプリは、たとえば次のように書けます。
+
+```python
+from miotts_reference_voice import load_voice
+
+
+class NarrationVoices:
+    def __init__(self) -> None:
+        self.voice = load_voice()
+        self.reference_map = {
+            "guide": "reference",
+            "host": "reference_2",
+        }
+
+    def speak(self, role: str, text: str, output_path: str) -> None:
+        self.voice.save_wav(
+            text,
+            output_path,
+            reference_audio_name=self.reference_map[role],
+        )
+
+
+app = NarrationVoices()
+app.speak("guide", "展示の案内を始めます。", "guide.wav")
+app.speak("host", "イベントを開始します。", "host.wav")
+```
+
+`Irodori-TTS` でも同じ形で `load_voice()` した module に対して
+`reference_audio_name=` を切り替えれば使い分けられます。
 
 ## 開発者向けの補足
 

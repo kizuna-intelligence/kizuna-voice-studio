@@ -25,21 +25,31 @@ def _voice_for_family(package, args: argparse.Namespace):
         return package.load_voice(
             api_base_url=args.mio_base_url,
             model_id=args.mio_model_id,
+            reference_audio_name=args.reference_audio_name,
+        )
+    if args.family == "irodori":
+        return package.load_voice(
+            device=args.device,
+            reference_audio_name=args.reference_audio_name,
         )
     raise ValueError(f"Unsupported family: {args.family}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--family", required=True, choices=["piper", "sbv2", "miotts"])
+    parser.add_argument("--family", required=True, choices=["piper", "sbv2", "miotts", "irodori"])
     parser.add_argument("--package-dir", required=True)
     parser.add_argument("--module-name", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--texts-json", required=True)
+    parser.add_argument("--texts-json")
+    parser.add_argument("--texts-path")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--mio-base-url")
     parser.add_argument("--mio-model-id")
+    parser.add_argument("--reference-audio-name")
     args = parser.parse_args()
+    if bool(args.texts_json) == bool(args.texts_path):
+        raise ValueError("Specify exactly one of --texts-json or --texts-path")
 
     package_dir = Path(args.package_dir)
     src_root = package_dir / "src"
@@ -48,13 +58,21 @@ def main() -> int:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    texts = [text.strip() for text in json.loads(args.texts_json) if str(text).strip()]
+    texts_payload = (
+        Path(args.texts_path).read_text(encoding="utf-8")
+        if args.texts_path
+        else args.texts_json
+    )
+    texts = [text.strip() for text in json.loads(texts_payload) if str(text).strip()]
 
     samples: list[dict[str, str]] = []
     for index, text in enumerate(texts, start=1):
         sample_id = f"sample_{index:02d}"
         output_path = output_dir / f"{sample_id}.wav"
-        voice.save_wav(text, output_path)
+        save_kwargs = {}
+        if args.reference_audio_name:
+            save_kwargs["reference_audio_name"] = args.reference_audio_name
+        voice.save_wav(text, output_path, **save_kwargs)
         samples.append(
             {
                 "id": sample_id,

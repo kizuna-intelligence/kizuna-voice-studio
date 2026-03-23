@@ -21,6 +21,13 @@ const previewMiottsPackageButton = document.getElementById("previewMiottsPackage
 const downloadMiottsPackageButton = document.getElementById("downloadMiottsPackageButton");
 const miottsPreviewTextsInput = document.getElementById("miottsPreviewTexts");
 const miottsPreviewList = document.getElementById("miottsPreviewList");
+const irodoriPanel = document.getElementById("irodoriPanel");
+const irodoriModelIdInput = document.getElementById("irodoriModelId");
+const buildIrodoriPackageButton = document.getElementById("buildIrodoriPackageButton");
+const previewIrodoriPackageButton = document.getElementById("previewIrodoriPackageButton");
+const downloadIrodoriPackageButton = document.getElementById("downloadIrodoriPackageButton");
+const irodoriPreviewTextsInput = document.getElementById("irodoriPreviewTexts");
+const irodoriPreviewList = document.getElementById("irodoriPreviewList");
 const buildTtsButton = document.getElementById("buildTtsButton");
 const downloadButton = document.getElementById("downloadButton");
 const generatedPackagePreviewTextsInput = document.getElementById("generatedPackagePreviewTexts");
@@ -98,7 +105,16 @@ function fallbackComputeTargets(profile = buildInfo.backendProfile) {
   }
   if (profile === "amd") {
     return [
-      { value: "cpu", label: "CPU / 互換実行", description: "この配布版は AMD 環境向けの互換実行を前提にしています。" },
+      {
+        value: "gpu:0",
+        label: "GPU 0",
+        description: "AMD / DirectML の GPU 実行です。対応していない処理だけ CPU に残ります。",
+      },
+      {
+        value: "cpu",
+        label: "CPU",
+        description: "GPU を使わず CPU で実行します。",
+      },
     ];
   }
   if (profile === "apple") {
@@ -148,7 +164,7 @@ function buildVariantSummary(info) {
     return `この配布版は NVIDIA GPU 向けです。CUDA は新しい系統のみを対象にしています。初回起動時は必要な Python 環境を自動で準備し、既定の実行先は ${info.defaultComputeTarget.toUpperCase()} です。`;
   }
   if (info.backendProfile === "amd") {
-    return "この配布版は AMD / 非NVIDIA 環境向けです。種音声は Kizuna Voice Designer と Qwen Voice Designer の両方を選べます。";
+    return "この配布版は AMD / 非NVIDIA 環境向けです。SBV2 学習は DirectML GPU を優先し、対応していない処理だけ CPU を使います。";
   }
   if (info.backendProfile === "cpu") {
     return "この配布版は CPU 専用です。初回起動時に必要な Python 環境を自動で準備し、GPU 学習や GPU 推論は含めません。";
@@ -271,6 +287,10 @@ function updateModelRecommendation() {
 
 function setMiottsPanelEnabled(isEnabled) {
   miottsPanel.classList.toggle("locked-panel", !isEnabled);
+}
+
+function setIrodoriPanelEnabled(isEnabled) {
+  irodoriPanel.classList.toggle("locked-panel", !isEnabled);
 }
 
 function setModelSelectionEnabled(isEnabled) {
@@ -415,17 +435,23 @@ function setButtonsState({
   previewBusy = false,
   miottsBusy = false,
   miottsPreviewBusy = false,
+  irodoriBusy = false,
+  irodoriPreviewBusy = false,
   packagePreviewBusy = false,
   buildBusy = false,
   previewEnabled = true,
   miottsEnabled = false,
   miottsPreviewEnabled = false,
+  irodoriEnabled = false,
+  irodoriPreviewEnabled = false,
   packagePreviewEnabled = false,
   buildEnabled = false,
 } = {}) {
   previewButton.disabled = previewBusy || !previewEnabled;
   buildMiottsPackageButton.disabled = miottsBusy || !miottsEnabled;
   previewMiottsPackageButton.disabled = miottsPreviewBusy || !miottsPreviewEnabled;
+  buildIrodoriPackageButton.disabled = irodoriBusy || !irodoriEnabled;
+  previewIrodoriPackageButton.disabled = irodoriPreviewBusy || !irodoriPreviewEnabled;
   previewGeneratedPackageButton.disabled = packagePreviewBusy || !packagePreviewEnabled;
   buildTtsButton.disabled = buildBusy || !buildEnabled;
   previewButton.textContent = previewBusy ? "種音声を生成中..." : "1. 種音声を作成";
@@ -433,6 +459,12 @@ function setButtonsState({
     ? "MioTTS パッケージを作成中..."
     : "学習なしの MioTTS パッケージを作る";
   previewMiottsPackageButton.textContent = miottsPreviewBusy
+    ? "試聴音声を生成中..."
+    : "このパッケージで試す";
+  buildIrodoriPackageButton.textContent = irodoriBusy
+    ? "Irodori-TTS パッケージを作成中..."
+    : "学習なしの Irodori-TTS パッケージを作る";
+  previewIrodoriPackageButton.textContent = irodoriPreviewBusy
     ? "試聴音声を生成中..."
     : "このパッケージで試す";
   previewGeneratedPackageButton.textContent = packagePreviewBusy
@@ -546,13 +578,39 @@ function setMiottsDownloadReady(projectId, manifest) {
   downloadMiottsPackageButton.classList.remove("hidden");
 }
 
+function setIrodoriDownloadReady(projectId, manifest) {
+  if (!manifest || !manifest.archive_path) {
+    downloadIrodoriPackageButton.classList.add("hidden");
+    downloadIrodoriPackageButton.removeAttribute("href");
+    downloadIrodoriPackageButton.removeAttribute("download");
+    return;
+  }
+
+  const path = `/v1/projects/${encodeURIComponent(projectId)}/package/irodori/download`;
+  downloadIrodoriPackageButton.href = apiUrl(path);
+  downloadIrodoriPackageButton.download = manifest.archive_path.split("/").pop();
+  downloadIrodoriPackageButton.classList.remove("hidden");
+}
+
 function clearMiottsSamplePreviews() {
   miottsPreviewList.innerHTML = "";
   miottsPreviewList.classList.add("hidden");
 }
 
+function clearIrodoriSamplePreviews() {
+  irodoriPreviewList.innerHTML = "";
+  irodoriPreviewList.classList.add("hidden");
+}
+
 function collectMiottsPreviewTexts() {
   return (miottsPreviewTextsInput?.value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function collectIrodoriPreviewTexts() {
+  return (irodoriPreviewTextsInput?.value || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -593,6 +651,36 @@ function setMiottsSamplePreviews(projectId, manifest) {
     miottsPreviewList.appendChild(card);
   });
   miottsPreviewList.classList.remove("hidden");
+}
+
+function setIrodoriSamplePreviews(projectId, manifest) {
+  if (!manifest?.samples?.length) {
+    clearIrodoriSamplePreviews();
+    return;
+  }
+
+  irodoriPreviewList.innerHTML = "";
+  manifest.samples.forEach((sample, index) => {
+    const card = document.createElement("article");
+    card.className = "sample-preview-card";
+
+    const title = document.createElement("h3");
+    title.textContent = `試聴 ${index + 1}`;
+    card.appendChild(title);
+
+    const text = document.createElement("p");
+    text.textContent = sample.text;
+    card.appendChild(text);
+
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.preload = "none";
+    audio.src = `${apiUrl(`/v1/projects/${encodeURIComponent(projectId)}/package/irodori/preview/${encodeURIComponent(sample.id)}/audio`)}?t=${Date.now()}`;
+    card.appendChild(audio);
+
+    irodoriPreviewList.appendChild(card);
+  });
+  irodoriPreviewList.classList.remove("hidden");
 }
 
 function clearGeneratedPackagePreviews() {
@@ -659,9 +747,12 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
         previewEnabled: true,
         miottsEnabled: true,
         miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+        irodoriEnabled: true,
+        irodoriPreviewEnabled: payload.irodori_package?.ready || payload.irodori_package_preview?.ready,
         buildEnabled: true,
       });
       setMiottsPanelEnabled(true);
+      setIrodoriPanelEnabled(true);
       setModelSelectionEnabled(true);
     }
   }
@@ -672,7 +763,9 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
     activeModelFamily === "sbv2" ? payload.sbv2_package_preview?.manifest : payload.package_preview?.manifest;
   setDownloadReady(projectId, activePackage, activeModelFamily);
   setMiottsDownloadReady(projectId, payload.miotts_package?.manifest);
+  setIrodoriDownloadReady(projectId, payload.irodori_package?.manifest);
   setMiottsSamplePreviews(projectId, payload.miotts_package_preview?.manifest);
+  setIrodoriSamplePreviews(projectId, payload.irodori_package_preview?.manifest);
   setGeneratedPackagePreviews(projectId, activePackagePreview, activeModelFamily);
 
   if ((activeModelFamily === "piper" && payload.package?.ready) || (activeModelFamily === "sbv2" && payload.sbv2_package?.ready)) {
@@ -687,10 +780,13 @@ async function hydrateProject(projectId, { quietOutput = false } = {}) {
         previewEnabled: true,
         miottsEnabled: true,
         miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+        irodoriEnabled: true,
+        irodoriPreviewEnabled: payload.irodori_package?.ready || payload.irodori_package_preview?.ready,
         packagePreviewEnabled: Boolean(activePackage || activePackagePreview),
         buildEnabled: true,
       });
     setMiottsPanelEnabled(true);
+    setIrodoriPanelEnabled(true);
     setModelSelectionEnabled(true);
   }
   return payload;
@@ -725,10 +821,13 @@ async function pollJob(jobId, projectId, { mode }) {
           previewEnabled: true,
           miottsEnabled: true,
           miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+          irodoriEnabled: true,
+          irodoriPreviewEnabled: payload.irodori_package?.ready || payload.irodori_package_preview?.ready,
           packagePreviewEnabled: false,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
+        setIrodoriPanelEnabled(true);
         setModelSelectionEnabled(true);
         setStatus("声サンプルができました。再生して確認し、よければ「この声で TTS を作る」を押してください。");
       } else {
@@ -743,10 +842,13 @@ async function pollJob(jobId, projectId, { mode }) {
           previewEnabled: true,
           miottsEnabled: true,
           miottsPreviewEnabled: payload.miotts_package?.ready || payload.miotts_package_preview?.ready,
+          irodoriEnabled: true,
+          irodoriPreviewEnabled: payload.irodori_package?.ready || payload.irodori_package_preview?.ready,
           packagePreviewEnabled: true,
           buildEnabled: true,
         });
         setMiottsPanelEnabled(true);
+        setIrodoriPanelEnabled(true);
         setModelSelectionEnabled(true);
         setStatus(`${modelCopy[selectedModelFamily()].label} のパッケージを用意しました。下のボタンからダウンロードできます。`);
       }
@@ -806,6 +908,8 @@ previewButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: false,
       miottsPreviewEnabled: false,
+      irodoriEnabled: false,
+      irodoriPreviewEnabled: false,
       packagePreviewEnabled: false,
       buildEnabled: false,
     });
@@ -813,10 +917,13 @@ previewButton.addEventListener("click", async () => {
     projectIdInput.value = "";
     setDownloadReady("", null, selectedModelFamily());
     setMiottsDownloadReady("", null);
+    setIrodoriDownloadReady("", null);
     clearMiottsSamplePreviews();
+    clearIrodoriSamplePreviews();
     clearGeneratedPackagePreviews();
     setInitialStageBoard();
     setMiottsPanelEnabled(false);
+    setIrodoriPanelEnabled(false);
     setModelSelectionEnabled(false);
     setStatus("種音声を生成しています。しばらく待ってください。");
     showProgress("種音声の作成", 8);
@@ -837,6 +944,7 @@ previewButton.addEventListener("click", async () => {
   } catch (error) {
     setInitialStageBoard();
     setMiottsPanelEnabled(false);
+    setIrodoriPanelEnabled(false);
     setModelSelectionEnabled(false);
     hideProgress();
     setStatus("種音声の生成に失敗しました。詳細ログを確認してください。");
@@ -846,6 +954,8 @@ previewButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: false,
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: false,
       packagePreviewEnabled: false,
       buildEnabled: previewReady,
     });
@@ -865,6 +975,8 @@ buildMiottsPackageButton.addEventListener("click", async () => {
       miottsBusy: true,
       miottsEnabled: true,
       miottsPreviewEnabled: false,
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -888,6 +1000,8 @@ buildMiottsPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -907,6 +1021,8 @@ previewMiottsPackageButton.addEventListener("click", async () => {
       miottsEnabled: true,
       miottsPreviewBusy: true,
       miottsPreviewEnabled: true,
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -929,6 +1045,100 @@ previewMiottsPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+  }
+});
+
+buildIrodoriPackageButton.addEventListener("click", async () => {
+  const projectId = projectIdInput.value;
+  if (!projectId) {
+    setStatus("先に種音声を作成して、声サンプルを確認してください。");
+    return;
+  }
+
+  try {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriBusy: true,
+      irodoriEnabled: true,
+      irodoriPreviewEnabled: false,
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+    setIrodoriDownloadReady("", null);
+    clearIrodoriSamplePreviews();
+    setStatus("種音声を同封した Irodori-TTS パッケージを作成しています。");
+    const payload = await request(`/v1/projects/${encodeURIComponent(projectId)}/package/irodori`, {
+      method: "POST",
+      body: JSON.stringify({
+        model_id: (irodoriModelIdInput?.value || "").trim() || null,
+      }),
+    });
+    setOutput(payload);
+    setIrodoriDownloadReady(projectId, payload);
+    setStatus("Irodori-TTS 参照音声パッケージを用意しました。ダウンロードしてそのまま使えます。");
+  } catch (error) {
+    setStatus("Irodori-TTS パッケージの作成に失敗しました。詳細ログを確認してください。");
+    setOutput({ error: String(error) });
+  } finally {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+  }
+});
+
+previewIrodoriPackageButton.addEventListener("click", async () => {
+  const projectId = projectIdInput.value;
+  if (!projectId) {
+    setStatus("先に種音声を作成して、声サンプルを確認してください。");
+    return;
+  }
+
+  try {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: true,
+      irodoriPreviewBusy: true,
+      irodoriPreviewEnabled: true,
+      packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
+      buildEnabled: previewReady,
+    });
+    clearIrodoriSamplePreviews();
+    setStatus("Irodori-TTS パッケージと同じ経路で、入力した文章の試聴音声を生成しています。");
+    const payload = await request(`/v1/projects/${encodeURIComponent(projectId)}/package/irodori/preview`, {
+      method: "POST",
+      body: JSON.stringify({
+        texts: collectIrodoriPreviewTexts(),
+        compute_target: selectedComputeTarget(),
+      }),
+    });
+    setOutput(payload);
+    setIrodoriSamplePreviews(projectId, payload);
+    setStatus(`Irodori-TTS パッケージの試聴音声を ${payload.samples?.length || 0} 本用意しました。`);
+  } catch (error) {
+    setStatus("Irodori-TTS パッケージの試聴生成に失敗しました。詳細ログを確認してください。");
+    setOutput({ error: String(error) });
+  } finally {
+    setButtonsState({
+      previewEnabled: true,
+      miottsEnabled: previewReady,
+      miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -948,6 +1158,8 @@ previewGeneratedPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewBusy: true,
       packagePreviewEnabled: true,
       buildEnabled: previewReady,
@@ -976,6 +1188,8 @@ previewGeneratedPackageButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: !downloadMiottsPackageButton.classList.contains("hidden"),
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: !downloadIrodoriPackageButton.classList.contains("hidden"),
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -995,6 +1209,8 @@ buildTtsButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: previewReady,
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: previewReady,
       packagePreviewEnabled: false,
       buildBusy: true,
       buildEnabled: true,
@@ -1023,6 +1239,8 @@ buildTtsButton.addEventListener("click", async () => {
       previewEnabled: true,
       miottsEnabled: previewReady,
       miottsPreviewEnabled: previewReady,
+      irodoriEnabled: previewReady,
+      irodoriPreviewEnabled: previewReady,
       packagePreviewEnabled: !downloadButton.classList.contains("hidden"),
       buildEnabled: previewReady,
     });
@@ -1034,12 +1252,15 @@ updateSeedVoiceBackendCopy();
 updateModelRecommendation();
 setInitialStageBoard();
 setMiottsPanelEnabled(false);
+setIrodoriPanelEnabled(false);
 setModelSelectionEnabled(false);
 hideProgress();
 setButtonsState({
   previewEnabled: true,
   miottsEnabled: false,
   miottsPreviewEnabled: false,
+  irodoriEnabled: false,
+  irodoriPreviewEnabled: false,
   packagePreviewEnabled: false,
   buildEnabled: false,
 });

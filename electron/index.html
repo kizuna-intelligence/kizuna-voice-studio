@@ -101,6 +101,48 @@
               <div id="miottsPreviewList" class="sample-preview-list hidden"></div>
             </section>
 
+            <section id="irodoriPanel" class="model-panel locked-panel" aria-label="Irodori-TTS を使う">
+              <div>
+                <p class="section-label">学習なしで使う</p>
+                <h2>Irodori-TTS 参照音声パッケージ</h2>
+              </div>
+              <p class="panel-lead">
+                種音声をそのまま同封し、Irodori-TTS の zero-shot checkpoint で `pip install` 用 zip を作ります。
+              </p>
+              <label>
+                Irodori-TTS checkpoint
+                <input
+                  id="irodoriModelId"
+                  type="text"
+                  value="Aratako/Irodori-TTS-500M"
+                  placeholder="Aratako/Irodori-TTS-500M"
+                />
+              </label>
+              <div class="button-row">
+                <button id="buildIrodoriPackageButton" class="secondary-button" disabled>
+                  学習なしの Irodori-TTS パッケージを作る
+                </button>
+                <button id="previewIrodoriPackageButton" class="secondary-button" disabled>
+                  このパッケージで試す
+                </button>
+                <a id="downloadIrodoriPackageButton" class="download-button hidden" href="#" download>
+                  Irodori-TTS パッケージをダウンロード
+                </a>
+              </div>
+              <label>
+                試したい文章
+                <textarea
+                  id="irodoriPreviewTexts"
+                  rows="4"
+                  placeholder="1行に1つずつ入力してください。空ならおすすめの3文を使います。"
+                >こんにちは。これは Irodori-TTS パッケージの自由入力プレビューです。
+この声で、zero-shot 生成したときの読み上げを確認できます。
+学習なしで使いたいケースの確認用として、そのまま試せるようにしています。</textarea>
+                <span class="field-hint">1行に1つずつ入れると、その行ごとに音声を生成します。</span>
+              </label>
+              <div id="irodoriPreviewList" class="sample-preview-list hidden"></div>
+            </section>
+
             <section id="modelPanel" class="model-panel locked-panel" aria-label="作るモデル">
               <div class="model-panel-header">
                 <div>

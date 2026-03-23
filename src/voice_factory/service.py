@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 import wave
 from contextlib import contextmanager
@@ -21,6 +22,7 @@ import torch
 from huggingface_hub import hf_hub_download, snapshot_download
 
 from .exporter import export_standalone_piper_module
+from .lavasr import LavaSRConfig, LavaSREnhancer
 from .models import ProjectPaths, VoiceProjectSpec
 from .translator import PromptTranslator
 
@@ -40,8 +42,11 @@ class VoiceFactoryService:
     _PIPER_MODULE_NAME = "piper_voice"
     _MIOTTS_PACKAGE_NAME = "miotts-reference-voice"
     _MIOTTS_MODULE_NAME = "miotts_reference_voice"
+    _IRODORI_PACKAGE_NAME = "irodori-reference-voice"
+    _IRODORI_MODULE_NAME = "irodori_reference_voice"
     _SBV2_PACKAGE_NAME = "style-bert-vits2-voice"
     _SBV2_MODULE_NAME = "style_bert_vits2_voice"
+    _IRODORI_DEFAULT_CHECKPOINT = "Aratako/Irodori-TTS-500M"
 
     _PROMPT_VARIANT_SUFFIXES: dict[str, list[str]] = {
         "emotional": [
@@ -86,12 +91,16 @@ class VoiceFactoryService:
         ("sample_02", "この音声は、学習をせずに参照音声だけを同封したパッケージから生成しています。"),
         ("sample_03", "落ち着いた読み上げや、アプリへの組み込み前の確認に使えるサンプルです。"),
     ]
+    _IRODORI_PREVIEW_TEXTS: list[tuple[str, str]] = [
+        ("sample_01", "こんにちは。これは Irodori-TTS のゼロショット音声生成プレビューです。"),
+        ("sample_02", "学習済みモデルは同梱せず、参照音声と checkpoint 指定だけで音声を生成しています。"),
+        ("sample_03", "パッケージ導入後にすぐ試せるよう、参照音声込みでそのまま実行できる形にしています。"),
+    ]
     _PACKAGE_PREVIEW_TEXTS: list[tuple[str, str]] = [
         ("sample_01", "こんにちは。これはパッケージ化した音声の動作確認です。"),
         ("sample_02", "自由に入力した文章を、そのまま読み上げ品質の確認に使えます。"),
         ("sample_03", "アプリへ組み込む前に、話し方や聞き取りやすさをここで試せます。"),
     ]
-
     def __init__(self, *, workspace_root: Path | None = None) -> None:
         self.workspace_root = workspace_root or WORKSPACE_ROOT
         self.projects_root = self.workspace_root / "projects"
@@ -100,6 +109,8 @@ class VoiceFactoryService:
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.prompt_bank = json.loads((PACKAGE_DIR / "prompt_bank.json").read_text(encoding="utf-8"))
         self.translator = PromptTranslator()
+        self._lavasr_enhancer: LavaSREnhancer | None = None
+        self._lavasr_signature: tuple[str, str, bool, bool] | None = None
 
     def _timestamp_token(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -123,6 +134,12 @@ class VoiceFactoryService:
             raise ValueError(f"Unsupported model family: {model_family}")
         return normalized
 
+    def _normalize_package_family(self, family: str | None) -> str:
+        normalized = (family or "").strip().lower()
+        if normalized not in {"piper", "sbv2", "irodori"}:
+            raise ValueError(f"Unsupported package family: {family}")
+        return normalized
+
     def _normalize_seed_voice_backend(self, seed_voice_backend: str | None) -> str:
         normalized = (seed_voice_backend or "kizuna").strip().lower()
         if normalized not in {"kizuna", "qwen"}:
@@ -131,6 +148,9 @@ class VoiceFactoryService:
 
     def default_mio_base_url(self) -> str:
         return self._DEFAULT_MIO_BASE_URL
+
+    def _is_amd_backend_profile(self) -> bool:
+        return os.name == "nt" and os.environ.get("VOICE_FACTORY_BACKEND_PROFILE", "").strip().lower() == "amd"
 
     def _normalize_compute_target(self, compute_target: str | None) -> str:
         normalized = (compute_target or "auto").strip().lower()
@@ -153,6 +173,8 @@ class VoiceFactoryService:
         if normalized == "cpu":
             return "cpu"
         if normalized.startswith("gpu:"):
+            if self._is_amd_backend_profile():
+                return "cpu"
             return "cuda"
         return "auto"
 
@@ -162,8 +184,15 @@ class VoiceFactoryService:
         env.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
         if normalized == "cpu":
             env["CUDA_VISIBLE_DEVICES"] = ""
+            env.pop("VOICE_FACTORY_DIRECTML_DEVICE_INDEX", None)
         elif normalized.startswith("gpu:"):
             env["CUDA_VISIBLE_DEVICES"] = normalized.split(":", 1)[1]
+            if self._is_amd_backend_profile():
+                env["VOICE_FACTORY_DIRECTML_DEVICE_INDEX"] = normalized.split(":", 1)[1]
+            else:
+                env.pop("VOICE_FACTORY_DIRECTML_DEVICE_INDEX", None)
+        else:
+            env.pop("VOICE_FACTORY_DIRECTML_DEVICE_INDEX", None)
 
     def list_compute_targets(self) -> list[dict[str, str]]:
         targets = [
@@ -178,6 +207,28 @@ class VoiceFactoryService:
                 "description": "GPU を使わず CPU で実行します。",
             },
         ]
+        if self._is_amd_backend_profile():
+            try:
+                import torch_directml
+            except ImportError:
+                return targets
+            try:
+                device_count = int(torch_directml.device_count())
+            except Exception:
+                device_count = 0
+            for device_index in range(device_count):
+                try:
+                    device_name = str(torch_directml.device_name(device_index))
+                except Exception:
+                    device_name = f"DirectML Device {device_index}"
+                targets.append(
+                    {
+                        "value": f"gpu:{device_index}",
+                        "label": f"GPU {device_index}",
+                        "description": f"{device_name} / DirectML",
+                    }
+                )
+            return targets
         try:
             result = subprocess.run(
                 [
@@ -223,6 +274,55 @@ class VoiceFactoryService:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+    def _lavasr_device(self) -> str:
+        compute_target = self._normalize_compute_target(os.environ.get("VOICE_FACTORY_COMPUTE_TARGET"))
+        if compute_target == "cpu":
+            return "cpu"
+        if compute_target.startswith("gpu:"):
+            return "cuda"
+        return "auto"
+
+    def _get_lavasr_enhancer(self) -> LavaSREnhancer:
+        model_id = os.environ.get("VOICE_FACTORY_LAVASR_MODEL_ID", "YatharthS/LavaSR").strip()
+        device = self._lavasr_device()
+        denoise = self._env_flag("VOICE_FACTORY_LAVASR_DENOISE", default=False)
+        batch = self._env_flag("VOICE_FACTORY_LAVASR_BATCH", default=False)
+        signature = (model_id, device, denoise, batch)
+        if self._lavasr_enhancer is None or self._lavasr_signature != signature:
+            self._lavasr_enhancer = LavaSREnhancer(
+                LavaSRConfig(
+                    model_id=model_id,
+                    device=device,
+                    denoise=denoise,
+                    batch=batch,
+                )
+            )
+            self._lavasr_signature = signature
+        return self._lavasr_enhancer
+
+    def _should_enhance_preview_reference(self, spec: VoiceProjectSpec) -> bool:
+        if spec.target_model_family != "sbv2":
+            return False
+        return self._env_flag("VOICE_FACTORY_SBV2_PREVIEW_USE_LAVASR", default=True)
+
+    def _finalize_preview_reference(
+        self,
+        spec: VoiceProjectSpec,
+        *,
+        reference_path: Path,
+        sample_rate: int,
+        payload: dict[str, Any],
+    ) -> tuple[int, dict[str, Any]]:
+        if not self._should_enhance_preview_reference(spec):
+            return sample_rate, payload
+        original_path = reference_path.with_name("reference.original.wav")
+        shutil.copy2(reference_path, original_path)
+        self._get_lavasr_enhancer().enhance_file(original_path, reference_path)
+        payload["reference_wav_original"] = str(original_path)
+        payload["preview_audio_backend"] = "lavasr"
+        payload["sample_rate"] = 48000
+        return 48000, payload
 
     def create_simple_project(
         self,
@@ -429,6 +529,77 @@ class VoiceFactoryService:
     def _preview_audio_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).preview_dir / "reference.wav"
 
+    def _resolve_reference_audio_paths(
+        self,
+        project_id: str,
+        *,
+        reference_audio_paths: list[str | Path] | None = None,
+    ) -> list[Path]:
+        candidate_paths = (
+            list(reference_audio_paths)
+            if reference_audio_paths
+            else [self.get_preview_audio_path(project_id)]
+        )
+        if not candidate_paths:
+            raise ValueError("At least one reference audio path is required.")
+
+        project_dir = self.get_project_paths(project_id).project_dir
+        resolved_paths: list[Path] = []
+        seen: set[Path] = set()
+        for raw_path in candidate_paths:
+            candidate = Path(raw_path).expanduser()
+            if not candidate.is_absolute():
+                candidate = candidate.resolve() if candidate.exists() else (project_dir / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            if not candidate.exists():
+                raise FileNotFoundError(f"Reference audio was not found: {candidate}")
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            resolved_paths.append(candidate)
+
+        if not resolved_paths:
+            raise ValueError("At least one unique reference audio path is required.")
+        return resolved_paths
+
+    def _sanitize_reference_audio_name(self, value: str, *, fallback: str) -> str:
+        sanitized = self._short_label(value, default=fallback, max_len=48)
+        return sanitized.replace("-", "_")
+
+    def _copy_reference_audio_assets(
+        self,
+        reference_audio_paths: list[Path],
+        *,
+        assets_dir: Path,
+    ) -> list[dict[str, str]]:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        copied_assets: list[dict[str, str]] = []
+        used_names: set[str] = set()
+        for index, source_path in enumerate(reference_audio_paths, start=1):
+            base_name = self._sanitize_reference_audio_name(
+                source_path.stem,
+                fallback=f"reference_{index:02d}",
+            )
+            unique_name = base_name
+            suffix_index = 2
+            while unique_name in used_names:
+                unique_name = f"{base_name}_{suffix_index}"
+                suffix_index += 1
+            used_names.add(unique_name)
+            asset_filename = f"{unique_name}{source_path.suffix or '.wav'}"
+            copied_path = assets_dir / asset_filename
+            shutil.copy2(source_path, copied_path)
+            copied_assets.append(
+                {
+                    "name": unique_name,
+                    "asset_name": asset_filename,
+                    "audio_path": str(copied_path),
+                    "source_path": str(source_path),
+                }
+            )
+        return copied_assets
+
     def _dataset_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).raw_dataset_dir / "manifest.json"
 
@@ -447,8 +618,14 @@ class VoiceFactoryService:
     def _miotts_package_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).distribution_dir / "miotts-package.json"
 
+    def _irodori_package_manifest_path(self, project_id: str) -> Path:
+        return self.get_project_paths(project_id).distribution_dir / "irodori-package.json"
+
     def _miotts_package_preview_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).distribution_dir / "miotts-package-preview.json"
+
+    def _irodori_package_preview_manifest_path(self, project_id: str) -> Path:
+        return self.get_project_paths(project_id).distribution_dir / "irodori-package-preview.json"
 
     def _package_preview_manifest_path(self, project_id: str) -> Path:
         return self.get_project_paths(project_id).distribution_dir / "package-preview.json"
@@ -802,8 +979,20 @@ class VoiceFactoryService:
             return None
         return json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    def get_irodori_package_manifest(self, project_id: str) -> dict[str, Any] | None:
+        manifest_path = self._irodori_package_manifest_path(project_id)
+        if not manifest_path.exists():
+            return None
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
     def get_miotts_package_preview_manifest(self, project_id: str) -> dict[str, Any] | None:
         manifest_path = self._miotts_package_preview_manifest_path(project_id)
+        if not manifest_path.exists():
+            return None
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    def get_irodori_package_preview_manifest(self, project_id: str) -> dict[str, Any] | None:
+        manifest_path = self._irodori_package_preview_manifest_path(project_id)
         if not manifest_path.exists():
             return None
         return json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -832,6 +1021,8 @@ class VoiceFactoryService:
         sbv2_package_preview_manifest = self.get_sbv2_package_preview_manifest(project_id)
         miotts_package_manifest = self.get_miotts_package_manifest(project_id)
         miotts_package_preview_manifest = self.get_miotts_package_preview_manifest(project_id)
+        irodori_package_manifest = self.get_irodori_package_manifest(project_id)
+        irodori_package_preview_manifest = self.get_irodori_package_preview_manifest(project_id)
         dataset_manifest_path = self._dataset_manifest_path(project_id)
         item_count = None
         if dataset_manifest_path.exists():
@@ -870,6 +1061,14 @@ class VoiceFactoryService:
                 "ready": miotts_package_preview_manifest is not None,
                 "manifest": miotts_package_preview_manifest,
             },
+            "irodori_package": {
+                "ready": irodori_package_manifest is not None,
+                "manifest": irodori_package_manifest,
+            },
+            "irodori_package_preview": {
+                "ready": irodori_package_preview_manifest is not None,
+                "manifest": irodori_package_preview_manifest,
+            },
             "jobs": self.list_jobs(project_id=project_id)[:10],
         }
 
@@ -891,12 +1090,70 @@ class VoiceFactoryService:
         )
 
     def _require_sbv2_runtime(self) -> None:
+        custom_python = os.environ.get("VOICE_FACTORY_SBV2_TRAIN_PYTHON")
+        if custom_python:
+            if not Path(custom_python).expanduser().exists():
+                raise RuntimeError(
+                    f"VOICE_FACTORY_SBV2_TRAIN_PYTHON was set but not found: {custom_python}"
+                )
+            return
         self._require_python_module(
             "style_bert_vits2",
             install_hint=(
                 "Style-Bert-VITS2 runtime is not installed. "
-                "Install it with `pip install git+https://github.com/litagin02/Style-Bert-VITS2.git`."
+                "Install it with `pip install \"transformers<5\" git+https://github.com/litagin02/Style-Bert-VITS2.git`."
             ),
+        )
+
+    def _require_irodori_runtime(self) -> None:
+        runtime = self._irodori_runtime_python()
+        if not Path(runtime).expanduser().exists():
+            raise RuntimeError(f"Irodori runtime python was not found: {runtime}")
+
+    def _irodori_runtime_python(self) -> str:
+        custom_python = os.environ.get("VOICE_FACTORY_IRODORI_RUNTIME_PYTHON")
+        if custom_python:
+            return custom_python
+        try:
+            source_root = self._irodori_source_root()
+        except FileNotFoundError:
+            return sys.executable
+        candidates = [
+            source_root / ".venv" / "bin" / "python",
+            source_root / ".venv" / "Scripts" / "python.exe",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return sys.executable
+
+    def _irodori_source_root(self) -> Path:
+        candidates = [
+            os.environ.get("VOICE_FACTORY_IRODORI_SOURCE_ROOT"),
+            str(REPO_ROOT.parent / "dev" / "Irodori-TTS"),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            root = Path(candidate).expanduser()
+            if (root / "irodori_tts" / "__init__.py").exists():
+                return root.resolve()
+        raise FileNotFoundError(
+            "Irodori-TTS source was not found. Clone https://github.com/Aratako/Irodori-TTS "
+            "under ../dev/Irodori-TTS or set VOICE_FACTORY_IRODORI_SOURCE_ROOT."
+        )
+
+    def _sbv2_training_python_executable(self) -> str:
+        return os.environ.get("VOICE_FACTORY_SBV2_TRAIN_PYTHON", sys.executable)
+
+    def _use_sbv2_directml(self) -> bool:
+        return self._is_amd_backend_profile() and self._env_flag("VOICE_FACTORY_SBV2_USE_DIRECTML", default=False)
+
+    def _use_piper_directml(self, compute_target: str | None = None) -> bool:
+        normalized = self._normalize_compute_target(compute_target or os.environ.get("VOICE_FACTORY_COMPUTE_TARGET"))
+        return (
+            self._is_amd_backend_profile()
+            and normalized.startswith("gpu:")
         )
 
     def _subprocess_env(self) -> dict[str, str]:
@@ -950,6 +1207,8 @@ class VoiceFactoryService:
 
     def _package_runtime_python(self, family: str) -> str:
         normalized = family.strip().lower()
+        if normalized == "irodori":
+            return self._irodori_runtime_python()
         env_name = {
             "piper": "VOICE_FACTORY_PIPER_RUNTIME_PYTHON",
             "sbv2": "VOICE_FACTORY_SBV2_RUNTIME_PYTHON",
@@ -1225,6 +1484,12 @@ class VoiceFactoryService:
                 "seed_voice_device": resolved_device,
                 "seed_text": spec.seed_text,
             }
+            sample_rate, payload = self._finalize_preview_reference(
+                spec,
+                reference_path=reference_path,
+                sample_rate=int(sample_rate),
+                payload=payload,
+            )
         else:
             translated_instruction = self._translate_style_instruction(spec)
             try:
@@ -1274,6 +1539,12 @@ class VoiceFactoryService:
                 "seed_voice_device": resolved_device,
                 "seed_text": spec.seed_text,
             }
+            sample_rate, payload = self._finalize_preview_reference(
+                spec,
+                reference_path=reference_path,
+                sample_rate=int(sample_rate),
+                payload=payload,
+            )
         manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return payload
 
@@ -1376,6 +1647,8 @@ class VoiceFactoryService:
             "manifest_path": str(manifest_path),
             "piper_dataset_dir": str(paths.piper_ljspeech_dir),
             "sbv2_dataset_dir": str(paths.sbv2_data_dir / spec.speaker_name),
+            "sbv2_raw_audio_backend": "lavasr" if self._env_flag("VOICE_FACTORY_SBV2_USE_LAVASR", default=True) else "copy",
+            "sbv2_raw_audio_sample_rate": 48000 if self._env_flag("VOICE_FACTORY_SBV2_USE_LAVASR", default=True) else None,
             "zero_shot_model": spec.mio_model_label,
         }
 
@@ -1441,12 +1714,19 @@ class VoiceFactoryService:
         for item in manifest_items:
             source_wav = Path(item["wav_path"])
             target_wav = raw_dir / f"{item['id']}.wav"
-            target_wav.write_bytes(source_wav.read_bytes())
+            self._write_sbv2_training_wav(source_wav, target_wav)
             esd_lines.append(f"{item['id']}.wav|{spec.speaker_name}|JP|{item['text']}")
         (paths.sbv2_data_dir / spec.speaker_name / "esd.list").write_text(
             "\n".join(esd_lines) + "\n",
             encoding="utf-8",
         )
+
+    def _write_sbv2_training_wav(self, source_wav: Path, target_wav: Path) -> None:
+        if not self._env_flag("VOICE_FACTORY_SBV2_USE_LAVASR", default=True):
+            target_wav.write_bytes(source_wav.read_bytes())
+            return
+        # SBV2 upstream preprocessing already performs the final 44.1 kHz resample.
+        self._get_lavasr_enhancer().enhance_file(source_wav, target_wav)
 
     def _resample_wav(self, source_wav: Path, target_wav: Path, *, target_sr: int) -> None:
         with wave.open(str(source_wav), "rb") as reader:
@@ -1479,6 +1759,7 @@ class VoiceFactoryService:
         base_hparams = self._load_piper_base_hparams(project_id)
         compute_target = self._normalize_compute_target(os.environ.get("VOICE_FACTORY_COMPUTE_TARGET"))
         use_gpu = compute_target != "cpu"
+        use_directml = self._use_piper_directml(compute_target)
         max_epochs = max(1, self._env_int("VOICE_FACTORY_PIPER_MAX_EPOCHS", 300))
         checkpoint_epochs = max(
             1,
@@ -1486,13 +1767,13 @@ class VoiceFactoryService:
         )
         disable_wavlm = self._env_flag(
             "VOICE_FACTORY_PIPER_DISABLE_WAVLM",
-            default=not use_gpu,
+            default=(not use_gpu) or use_directml,
         )
         fine_tune_base_lr = float(os.environ.get("VOICE_FACTORY_PIPER_BASE_LR", "1e-4"))
         command = [
             self._piper_python_executable(),
             "-m",
-            "voice_factory.piper_train_wrapper",
+            "voice_factory.piper_directml_train" if use_directml else "voice_factory.piper_train_wrapper",
         ]
         command.extend(
             [
@@ -1540,7 +1821,9 @@ class VoiceFactoryService:
             str(base_hparams.get("seed", 1234)),
             ]
         )
-        if use_gpu:
+        if use_directml:
+            command.extend(["--accelerator", "gpu", "--devices", "1"])
+        elif use_gpu:
             command.extend(["--accelerator", "gpu", "--devices", "1"])
         else:
             command.extend(["--accelerator", "cpu"])
@@ -1566,28 +1849,41 @@ class VoiceFactoryService:
         paths = self.get_project_paths(project_id)
         self._write_sbv2_auto_config(spec, paths)
         preprocess_epochs = max(1, self._env_int("VOICE_FACTORY_SBV2_PREPROCESS_EPOCHS", 100))
-        return [
-            [
-                sys.executable,
+        python = self._sbv2_training_python_executable()
+        preprocess_command = [
+            python,
+            "-m",
+            "voice_factory.sbv2_preprocess_wrapper",
+            "-m",
+            spec.speaker_name,
+            "--use_jp_extra",
+            "-b",
+            str(profile["sbv2_preprocess_batch_size"]),
+            "-e",
+            str(preprocess_epochs),
+        ]
+        if self._use_sbv2_directml():
+            train_command = [
+                python,
                 "-m",
-                "voice_factory.sbv2_preprocess_wrapper",
-                "-m",
-                spec.speaker_name,
-                "--use_jp_extra",
-                "-b",
-                str(profile["sbv2_preprocess_batch_size"]),
-                "-e",
-                str(preprocess_epochs),
-            ],
-            [
-                sys.executable,
+                "voice_factory.sbv2_directml_train",
+                "--model-dir",
+                str(Path("Data") / spec.speaker_name),
+                "--config-path",
+                str(paths.sbv2_dir / "config.auto.json"),
+                "--style-bert-vits2-root",
+                "<STYLE_BERT_VITS2_ROOT>",
+            ]
+        else:
+            train_command = [
+                python,
                 "train_ms_jp_extra.py",
                 "-m",
                 str(Path("Data") / spec.speaker_name),
                 "-c",
                 str(paths.sbv2_dir / "config.auto.json"),
-            ],
-        ]
+            ]
+        return [preprocess_command, train_command]
 
     def _write_sbv2_auto_config(self, spec: VoiceProjectSpec, paths: ProjectPaths) -> Path:
         profile = self.recommend_training_profile(spec)
@@ -1689,8 +1985,22 @@ class VoiceFactoryService:
         if target.exists() or target.is_symlink():
             if target.is_symlink() and target.resolve() == source.resolve():
                 return target
-            raise RuntimeError(f"SBV2 dataset path already exists and is not the expected symlink: {target}")
-        os.symlink(source, target, target_is_directory=True)
+            if os.name == "nt":
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            else:
+                raise RuntimeError(f"SBV2 dataset path already exists and is not the expected symlink: {target}")
+        if os.name != "nt":
+            os.symlink(source, target, target_is_directory=True)
+            return target
+        try:
+            os.symlink(source, target, target_is_directory=True)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 1314:
+                raise
+            shutil.copytree(source, target)
         return target
 
     def _ensure_piper_base_checkpoint(self, project_id: str) -> Path:
@@ -1904,8 +2214,23 @@ class VoiceFactoryService:
             self._materialize_sbv2_dataset(spec, str(resolved_root))
             pretrained_assets = self._ensure_sbv2_pretrained_assets(project_id, str(resolved_root))
             self._write_sbv2_auto_config(spec, self.get_project_paths(project_id))
-            for command in commands:
-                subprocess.run(command, check=True, cwd=str(resolved_root))
+            preprocess_command = list(commands[0])
+            subprocess.run(preprocess_command, check=True, cwd=str(resolved_root))
+            if self._use_sbv2_directml():
+                train_command = [
+                    self._sbv2_training_python_executable(),
+                    "-m",
+                    "voice_factory.sbv2_directml_train",
+                    "--model-dir",
+                    str(Path("Data") / spec.speaker_name),
+                    "--config-path",
+                    str(self.get_project_paths(project_id).sbv2_dir / "config.auto.json"),
+                    "--style-bert-vits2-root",
+                    str(resolved_root),
+                ]
+            else:
+                train_command = list(commands[1])
+            subprocess.run(train_command, check=True, cwd=str(resolved_root), env=self._subprocess_env())
         else:
             pretrained_assets = None
         return {"commands": commands, "executed": execute, "pretrained_assets": pretrained_assets}
@@ -2111,13 +2436,17 @@ class VoiceFactoryService:
         *,
         mio_base_url: str | None = None,
         model_id: str | None = None,
-    ) -> dict[str, str]:
+        reference_audio_paths: list[str | Path] | None = None,
+    ) -> dict[str, Any]:
         paths = self.get_project_paths(project_id)
         spec = self.load_project(project_id)
         preview_manifest = self.get_preview_manifest(project_id)
-        reference_audio_path = self.get_preview_audio_path(project_id)
-        if preview_manifest is None or not reference_audio_path.exists():
+        if preview_manifest is None or not self.get_preview_audio_path(project_id).exists():
             raise FileNotFoundError("Preview is not ready. Generate the seed voice first.")
+        resolved_reference_audio_paths = self._resolve_reference_audio_paths(
+            project_id,
+            reference_audio_paths=reference_audio_paths,
+        )
 
         resolved_mio_base_url = (mio_base_url or self.default_mio_base_url()).rstrip("/")
         resolved_model_id = model_id or spec.mio_model_label
@@ -2129,8 +2458,15 @@ class VoiceFactoryService:
 
         src_dir = package_dir / "src" / module_name
         assets_dir = src_dir / "assets"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(reference_audio_path, assets_dir / "reference.wav")
+        reference_assets = self._copy_reference_audio_assets(
+            resolved_reference_audio_paths,
+            assets_dir=assets_dir,
+        )
+        (assets_dir / "reference_manifest.json").write_text(
+            json.dumps(reference_assets, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        default_reference_name = reference_assets[0]["name"]
 
         (src_dir / "__init__.py").write_text(
             "\n".join(
@@ -2150,6 +2486,7 @@ class VoiceFactoryService:
                 [
                     "from __future__ import annotations",
                     "",
+                    "import json",
                     "import os",
                     "from importlib import resources",
                     "from pathlib import Path",
@@ -2158,11 +2495,20 @@ class VoiceFactoryService:
                     "",
                     f'DEFAULT_API_BASE = "{resolved_mio_base_url}"',
                     f'DEFAULT_MODEL_ID = "{resolved_model_id}"',
+                    f'DEFAULT_REFERENCE_NAME = "{default_reference_name}"',
                     "",
                     "",
-                    "def _reference_audio_path() -> Path:",
-                    '    resource = resources.files(__package__) / "assets" / "reference.wav"',
-                    "    return Path(resource)",
+                    "def _reference_manifest() -> list[dict[str, str]]:",
+                    '    resource = resources.files(__package__) / "assets" / "reference_manifest.json"',
+                    "    return json.loads(Path(resource).read_text(encoding='utf-8'))",
+                    "",
+                    "",
+                    "def _packaged_references() -> dict[str, Path]:",
+                    "    assets_root = resources.files(__package__) / 'assets'",
+                    "    references: dict[str, Path] = {}",
+                    "    for item in _reference_manifest():",
+                    "        references[item['name']] = Path(assets_root / item['asset_name'])",
+                    "    return references",
                     "",
                     "",
                     "class PortableMioVoice:",
@@ -2172,24 +2518,51 @@ class VoiceFactoryService:
                     "        api_base_url: str | None = None,",
                     "        model_id: str | None = None,",
                     "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
                     "        timeout: float = 120.0,",
                     "    ) -> None:",
                     '        env_api_base = os.environ.get("MIOTTS_API_BASE", "").strip()',
                     "        self.api_base_url = (api_base_url or env_api_base or DEFAULT_API_BASE).rstrip('/')",
                     "        self.model_id = model_id or DEFAULT_MODEL_ID",
-                    "        self.reference_audio_path = (",
-                    "            Path(reference_audio_path).expanduser().resolve()",
-                    "            if reference_audio_path is not None",
-                    "            else _reference_audio_path()",
+                    "        self._packaged_references = _packaged_references()",
+                    "        self.available_references = tuple(self._packaged_references.keys())",
+                    "        self.reference_audio_path = self._resolve_reference_audio_path(",
+                    "            reference_audio_path=reference_audio_path,",
+                    "            reference_audio_name=reference_audio_name,",
                     "        )",
                     "        self.timeout = timeout",
                     "",
-                    "    def synthesize(self, text: str) -> bytes:",
+                    "    def _resolve_reference_audio_path(",
+                    "        self,",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "    ) -> Path:",
+                    "        if reference_audio_path is not None:",
+                    "            return Path(reference_audio_path).expanduser().resolve()",
+                    "        selected_name = (reference_audio_name or DEFAULT_REFERENCE_NAME).strip()",
+                    "        if selected_name not in self._packaged_references:",
+                    "            raise ValueError(",
+                    "                f'Unknown reference audio: {selected_name}. Available: {list(self._packaged_references)}'",
+                    "            )",
+                    "        return self._packaged_references[selected_name]",
+                    "",
+                    "    def synthesize(",
+                    "        self,",
+                    "        text: str,",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "    ) -> bytes:",
                     "        if not text or not text.strip():",
                     '            raise ValueError("text is required")',
-                    "        with self.reference_audio_path.open('rb') as reference_audio:",
+                    "        selected_reference_audio_path = self._resolve_reference_audio_path(",
+                    "            reference_audio_path=reference_audio_path,",
+                    "            reference_audio_name=reference_audio_name,",
+                    "        )",
+                    "        with selected_reference_audio_path.open('rb') as reference_audio:",
                     "            files = {",
-                    "                'reference_audio': (self.reference_audio_path.name, reference_audio, 'audio/wav')",
+                    "                'reference_audio': (selected_reference_audio_path.name, reference_audio, 'audio/wav')",
                     "            }",
                     "            data = {",
                     "                'text': text,",
@@ -2205,14 +2578,39 @@ class VoiceFactoryService:
                     "                response.raise_for_status()",
                     "                return response.content",
                     "",
-                    "    def synthesize_to_file(self, text: str, output_path: str | os.PathLike[str]) -> str:",
+                    "    def synthesize_to_file(",
+                    "        self,",
+                    "        text: str,",
+                    "        output_path: str | os.PathLike[str],",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "    ) -> str:",
                     "        output = Path(output_path)",
                     "        output.parent.mkdir(parents=True, exist_ok=True)",
-                    "        output.write_bytes(self.synthesize(text))",
+                    "        output.write_bytes(",
+                    "            self.synthesize(",
+                    "                text,",
+                    "                reference_audio_path=reference_audio_path,",
+                    "                reference_audio_name=reference_audio_name,",
+                    "            )",
+                    "        )",
                     "        return str(output)",
                     "",
-                    "    def save_wav(self, text: str, output_path: str | os.PathLike[str]) -> str:",
-                    "        return self.synthesize_to_file(text, output_path)",
+                    "    def save_wav(",
+                    "        self,",
+                    "        text: str,",
+                    "        output_path: str | os.PathLike[str],",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "    ) -> str:",
+                    "        return self.synthesize_to_file(",
+                    "            text,",
+                    "            output_path,",
+                    "            reference_audio_path=reference_audio_path,",
+                    "            reference_audio_name=reference_audio_name,",
+                    "        )",
                     "",
                     "",
                     "def load_voice(",
@@ -2220,12 +2618,14 @@ class VoiceFactoryService:
                     "    api_base_url: str | None = None,",
                     "    model_id: str | None = None,",
                     "    reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "    reference_audio_name: str | None = None,",
                     "    timeout: float = 120.0,",
                     ") -> PortableMioVoice:",
                     "    return PortableMioVoice(",
                     "        api_base_url=api_base_url,",
                     "        model_id=model_id,",
                     "        reference_audio_path=reference_audio_path,",
+                    "        reference_audio_name=reference_audio_name,",
                     "        timeout=timeout,",
                     "    )",
                     "",
@@ -2241,7 +2641,7 @@ class VoiceFactoryService:
                     "Generated by Kizuna Voice Studio.",
                     "",
                     "この zip には学習済みモデルは含まれません。",
-                    "プレビューで確定した `reference.wav` を同封し、MioTTS zero-shot API を使って音声生成します。",
+                    "プレビューで確定した参照音声群を同封し、MioTTS zero-shot API を使って音声生成します。",
                     "",
                     "## Install",
                     "",
@@ -2256,6 +2656,8 @@ class VoiceFactoryService:
                     "",
                     "voice = load_voice()",
                     'voice.save_wav("こんにちは。よろしくお願いします。", "sample.wav")',
+                    "print(voice.available_references)",
+                    'voice.save_wav("別の参照音声を使います。", "sample-alt.wav", reference_audio_name=voice.available_references[-1])',
                     "```",
                     "",
                     "必要なら API ベース URL を切り替えられます。",
@@ -2301,7 +2703,7 @@ class VoiceFactoryService:
                     'where = ["src"]',
                     "",
                     "[tool.setuptools.package-data]",
-                    f'"{module_name}" = ["assets/*.wav"]',
+                    f'"{module_name}" = ["assets/*.json", "assets/*.wav"]',
                     "",
                 ]
             ),
@@ -2323,7 +2725,9 @@ class VoiceFactoryService:
             "package_dir": str(package_dir),
             "archive_path": str(archive_path),
             "pip_install_example": f"pip install {archive_path.name}",
-            "reference_audio_path": str(reference_audio_path),
+            "reference_audio_paths": [str(path) for path in resolved_reference_audio_paths],
+            "reference_audios": reference_assets,
+            "default_reference_audio_name": default_reference_name,
             "mio_base_url": resolved_mio_base_url,
             "mio_model_id": resolved_model_id,
         }
@@ -2381,6 +2785,8 @@ class VoiceFactoryService:
             "project_id": project_id,
             "package_name": manifest["package_name"],
             "module_name": module_name,
+            "reference_audios": manifest.get("reference_audios", []),
+            "default_reference_audio_name": manifest.get("default_reference_audio_name"),
             "samples": samples,
         }
         self._miotts_package_preview_manifest_path(project_id).write_text(
@@ -2388,6 +2794,327 @@ class VoiceFactoryService:
             encoding="utf-8",
         )
         return preview_manifest
+
+    def build_installable_irodori_package(
+        self,
+        project_id: str,
+        *,
+        model_id: str | None = None,
+        reference_audio_paths: list[str | Path] | None = None,
+    ) -> dict[str, Any]:
+        paths = self.get_project_paths(project_id)
+        spec = self.load_project(project_id)
+        irodori_source_root = self._irodori_source_root()
+        preview_manifest = self.get_preview_manifest(project_id)
+        if preview_manifest is None or not self.get_preview_audio_path(project_id).exists():
+            raise FileNotFoundError("Preview is not ready. Generate the seed voice first.")
+        resolved_reference_audio_paths = self._resolve_reference_audio_paths(
+            project_id,
+            reference_audio_paths=reference_audio_paths,
+        )
+
+        resolved_model_id = model_id or spec.irodori_model_label or self._IRODORI_DEFAULT_CHECKPOINT
+        package_name = self._IRODORI_PACKAGE_NAME
+        module_name = self._IRODORI_MODULE_NAME
+        package_dir = paths.distribution_dir / package_name
+        if package_dir.exists():
+            shutil.rmtree(package_dir)
+
+        src_dir = package_dir / "src" / module_name
+        assets_dir = src_dir / "assets"
+        vendor_dir = src_dir / "vendor"
+        reference_assets = self._copy_reference_audio_assets(
+            resolved_reference_audio_paths,
+            assets_dir=assets_dir,
+        )
+        (assets_dir / "reference_manifest.json").write_text(
+            json.dumps(reference_assets, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        default_reference_name = reference_assets[0]["name"]
+        vendor_dir.mkdir(parents=True, exist_ok=True)
+        (vendor_dir / "__init__.py").write_text("", encoding="utf-8")
+        shutil.copytree(irodori_source_root / "irodori_tts", vendor_dir / "irodori_tts")
+
+        (src_dir / "__init__.py").write_text(
+            "\n".join(
+                [
+                    '"""Portable Irodori-TTS reference voice package."""',
+                    "",
+                    "from .voice import PortableIrodoriVoice, load_voice",
+                    "",
+                    '__all__ = ["PortableIrodoriVoice", "load_voice"]',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (src_dir / "voice.py").write_text(
+            "\n".join(
+                [
+                    "from __future__ import annotations",
+                    "",
+                    "import json",
+                    "import os",
+                    "from importlib import resources",
+                    "from pathlib import Path",
+                    "",
+                    "from huggingface_hub import hf_hub_download",
+                    "from .vendor.irodori_tts.inference_runtime import (",
+                    "    InferenceRuntime,",
+                    "    RuntimeKey,",
+                    "    SamplingRequest,",
+                    "    save_wav as save_generated_wav,",
+                    ")",
+                    "",
+                    f'DEFAULT_CHECKPOINT = "{resolved_model_id}"',
+                    f'DEFAULT_REFERENCE_NAME = "{default_reference_name}"',
+                    "",
+                    "",
+                    "def _reference_manifest() -> list[dict[str, str]]:",
+                    '    resource = resources.files(__package__) / "assets" / "reference_manifest.json"',
+                    "    return json.loads(Path(resource).read_text(encoding='utf-8'))",
+                    "",
+                    "",
+                    "def _packaged_references() -> dict[str, Path]:",
+                    "    assets_root = resources.files(__package__) / 'assets'",
+                    "    references: dict[str, Path] = {}",
+                    "    for item in _reference_manifest():",
+                    "        references[item['name']] = Path(assets_root / item['asset_name'])",
+                    "    return references",
+                    "",
+                    "",
+                    "def _normalize_device(device: str | None) -> str:",
+                    "    import torch",
+                    "",
+                    "    normalized = (device or 'auto').strip().lower()",
+                    "    if normalized in {'', 'auto'}:",
+                    "        if torch.cuda.is_available():",
+                    "            return 'cuda'",
+                    "        backends = getattr(torch, 'backends', None)",
+                    "        if backends is not None and hasattr(backends, 'mps') and torch.backends.mps.is_available():",
+                    "            return 'mps'",
+                    "        return 'cpu'",
+                    "    return normalized",
+                    "",
+                    "",
+                    "def _resolve_checkpoint_path(checkpoint: str) -> str:",
+                    "    checkpoint_path = Path(str(checkpoint)).expanduser()",
+                    "    if checkpoint_path.is_file():",
+                    "        return str(checkpoint_path.resolve())",
+                    "    return hf_hub_download(repo_id=str(checkpoint).strip(), filename='model.safetensors')",
+                    "",
+                    "",
+                    "class PortableIrodoriVoice:",
+                    "    def __init__(",
+                    "        self,",
+                    "        *,",
+                    "        checkpoint: str | None = None,",
+                    "        device: str = 'auto',",
+                    "        codec_device: str | None = None,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "        model_precision: str = 'fp32',",
+                    "        codec_precision: str = 'fp32',",
+                    "    ) -> None:",
+                    "        env_checkpoint = os.environ.get('IRODORI_TTS_CHECKPOINT', '').strip()",
+                    "        self.checkpoint = checkpoint or env_checkpoint or DEFAULT_CHECKPOINT",
+                    "        self._packaged_references = _packaged_references()",
+                    "        self.available_references = tuple(self._packaged_references.keys())",
+                    "        self.reference_audio_path = self._resolve_reference_audio_path(",
+                    "            reference_audio_path=reference_audio_path,",
+                    "            reference_audio_name=reference_audio_name,",
+                    "        )",
+                    "        self.device = _normalize_device(device)",
+                    "        self.codec_device = _normalize_device(codec_device or self.device)",
+                    "        checkpoint_path = _resolve_checkpoint_path(self.checkpoint)",
+                    "        self.runtime = InferenceRuntime.from_key(",
+                    "            RuntimeKey(",
+                    "                checkpoint=checkpoint_path,",
+                    "                model_device=self.device,",
+                    "                codec_device=self.codec_device,",
+                    "                model_precision=model_precision,",
+                    "                codec_precision=codec_precision,",
+                    "            )",
+                    "        )",
+                    "",
+                    "    def _resolve_reference_audio_path(",
+                    "        self,",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "    ) -> Path:",
+                    "        if reference_audio_path is not None:",
+                    "            return Path(reference_audio_path).expanduser().resolve()",
+                    "        selected_name = (reference_audio_name or DEFAULT_REFERENCE_NAME).strip()",
+                    "        if selected_name not in self._packaged_references:",
+                    "            raise ValueError(",
+                    "                f'Unknown reference audio: {selected_name}. Available: {list(self._packaged_references)}'",
+                    "            )",
+                    "        return self._packaged_references[selected_name]",
+                    "",
+                    "    def synthesize(",
+                    "        self,",
+                    "        text: str,",
+                    "        *,",
+                    "        reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "        reference_audio_name: str | None = None,",
+                    "        num_steps: int = 40,",
+                    "        cfg_scale_text: float = 3.0,",
+                    "        cfg_scale_speaker: float = 5.0,",
+                    "        seed: int | None = None,",
+                    "    ):",
+                    "        if not text or not text.strip():",
+                    '            raise ValueError("text is required")',
+                    "        selected_reference_audio_path = self._resolve_reference_audio_path(",
+                    "            reference_audio_path=reference_audio_path,",
+                    "            reference_audio_name=reference_audio_name,",
+                    "        )",
+                    "        return self.runtime.synthesize(",
+                    "            SamplingRequest(",
+                    "                text=text,",
+                    "                ref_wav=str(selected_reference_audio_path),",
+                    "                num_steps=int(num_steps),",
+                    "                cfg_scale_text=float(cfg_scale_text),",
+                    "                cfg_scale_speaker=float(cfg_scale_speaker),",
+                    "                seed=seed,",
+                    "            ),",
+                    "            log_fn=None,",
+                    "        )",
+                    "",
+                    "    def save_wav(self, text: str, output_path: str | os.PathLike[str], **kwargs) -> str:",
+                    "        output = Path(output_path)",
+                    "        result = self.synthesize(text, **kwargs)",
+                    "        saved = save_generated_wav(output, result.audio, result.sample_rate)",
+                    "        return str(saved)",
+                    "",
+                    "",
+                    "def load_voice(",
+                    "    *,",
+                    "    checkpoint: str | None = None,",
+                    "    device: str = 'auto',",
+                    "    codec_device: str | None = None,",
+                    "    reference_audio_path: str | os.PathLike[str] | None = None,",
+                    "    reference_audio_name: str | None = None,",
+                    "    model_precision: str = 'fp32',",
+                    "    codec_precision: str = 'fp32',",
+                    ") -> PortableIrodoriVoice:",
+                    "    return PortableIrodoriVoice(",
+                    "        checkpoint=checkpoint,",
+                    "        device=device,",
+                    "        codec_device=codec_device,",
+                    "        reference_audio_path=reference_audio_path,",
+                    "        reference_audio_name=reference_audio_name,",
+                    "        model_precision=model_precision,",
+                    "        codec_precision=codec_precision,",
+                    "    )",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "README.md").write_text(
+            "\n".join(
+                [
+                    f"# {package_name}",
+                    "",
+                    "Generated by Kizuna Voice Studio.",
+                    "",
+                    "この zip には複数の参照音声を同封できます。",
+                    "Irodori-TTS の公開 checkpoint を使って、zero-shot で音声生成します。",
+                    "",
+                    "## Install",
+                    "",
+                    "```bash",
+                    f"pip install {package_name}.zip",
+                    "```",
+                    "",
+                    "## Usage",
+                    "",
+                    "```python",
+                    f"from {module_name} import load_voice",
+                    "",
+                    "voice = load_voice(device='cuda')",
+                    'voice.save_wav("こんにちは。よろしくお願いします。", "sample.wav")',
+                    "print(voice.available_references)",
+                    'voice.save_wav("別の参照音声を使います。", "sample-alt.wav", reference_audio_name=voice.available_references[-1])',
+                    "```",
+                    "",
+                    f"- Source prompt: {spec.style_instruction}",
+                    f"- Seed voice backend: {spec.seed_voice_backend}",
+                    f"- Seed voice model: {spec.seed_voice_model if spec.seed_voice_backend == 'kizuna' else spec.qwen_model_id}",
+                    f"- Irodori-TTS checkpoint: {resolved_model_id}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "pyproject.toml").write_text(
+            "\n".join(
+                [
+                    "[build-system]",
+                    'requires = ["setuptools>=68"]',
+                    'build-backend = "setuptools.build_meta"',
+                    "",
+                    "[project]",
+                    f'name = "{package_name}"',
+                    'version = "0.1.1"',
+                    'description = "Portable Irodori-TTS reference voice package."',
+                    'readme = "README.md"',
+                    'requires-python = ">=3.10"',
+                    "dependencies = [",
+                    '  "dacvae @ git+https://github.com/facebookresearch/dacvae",',
+                    '  "huggingface-hub>=0.34.0,<1.0",',
+                    '  "numpy>=1.26.0",',
+                    '  "safetensors>=0.7.0",',
+                    '  "sentencepiece>=0.1.99,<0.2",',
+                    '  "soundfile>=0.12.0",',
+                    '  "torch>=2.10.0",',
+                    '  "torchaudio>=2.10.0",',
+                    '  "torchcodec>=0.10.0",',
+                    '  "transformers<5",',
+                    "]",
+                    "",
+                    "[tool.setuptools]",
+                    'package-dir = {"" = "src"}',
+                    'include-package-data = true',
+                    "",
+                    "[tool.setuptools.packages.find]",
+                    'where = ["src"]',
+                    "",
+                    "[tool.setuptools.package-data]",
+                    f'"{module_name}" = ["assets/*.json", "assets/*.wav"]',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        archive_base = paths.distribution_dir / package_name
+        archive_path = Path(
+            shutil.make_archive(
+                str(archive_base),
+                "zip",
+                root_dir=paths.distribution_dir,
+                base_dir=package_name,
+            )
+        )
+        manifest = {
+            "project_id": project_id,
+            "package_name": package_name,
+            "module_name": module_name,
+            "package_dir": str(package_dir),
+            "archive_path": str(archive_path),
+            "pip_install_example": f"pip install {archive_path.name}",
+            "reference_audio_paths": [str(path) for path in resolved_reference_audio_paths],
+            "reference_audios": reference_assets,
+            "default_reference_audio_name": default_reference_name,
+            "irodori_model_id": resolved_model_id,
+        }
+        self._irodori_package_manifest_path(project_id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return manifest
 
     def build_generated_package_previews(
         self,
@@ -2397,12 +3124,14 @@ class VoiceFactoryService:
         texts: list[str] | None = None,
         compute_target: str = "auto",
     ) -> dict[str, Any]:
-        normalized_family = self._normalize_model_family(family)
-        manifest = (
-            self.get_package_manifest(project_id)
-            if normalized_family == "piper"
-            else self.get_sbv2_package_manifest(project_id)
-        )
+        normalized_family = self._normalize_package_family(family)
+        if normalized_family == "irodori":
+            self._require_irodori_runtime()
+        manifest = {
+            "piper": self.get_package_manifest(project_id),
+            "sbv2": self.get_sbv2_package_manifest(project_id),
+            "irodori": self.get_irodori_package_manifest(project_id),
+        }[normalized_family]
         if manifest is None:
             raise FileNotFoundError(f"{normalized_family} package is not ready. Build it first.")
 
@@ -2412,42 +3141,61 @@ class VoiceFactoryService:
         if not (src_root / module_name / "__init__.py").exists():
             raise FileNotFoundError(f"Package module not found: {src_root / module_name}")
 
-        text_items = texts or [item[1] for item in self._PACKAGE_PREVIEW_TEXTS]
+        text_items = texts or [
+            item[1]
+            for item in (
+                self._IRODORI_PREVIEW_TEXTS
+                if normalized_family == "irodori"
+                else self._PACKAGE_PREVIEW_TEXTS
+            )
+        ]
         preview_dir = package_dir / "previews"
         preview_dir.mkdir(parents=True, exist_ok=True)
 
-        command = [
-            self._package_runtime_python(normalized_family),
-            "-m",
-            "voice_factory.package_runtime_runner",
-            "--family",
-            normalized_family,
-            "--package-dir",
-            str(package_dir),
-            "--module-name",
-            module_name,
-            "--output-dir",
-            str(preview_dir),
-            "--texts-json",
-            json.dumps(text_items, ensure_ascii=False),
-        ]
-        if normalized_family == "sbv2":
-            # Packaged SBV2 preview is more stable on CPU across managed runtimes.
-            device = "cpu"
-            command.extend(["--device", device])
-
         env = self._subprocess_env()
         self._apply_compute_target_to_env(env, compute_target)
-        preview_manifest = self._run_subprocess_json(command)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix="-package-preview-texts.json",
+            delete=False,
+        ) as texts_file:
+            texts_file.write(json.dumps(text_items, ensure_ascii=False))
+            texts_path = Path(texts_file.name)
+        try:
+            command = [
+                self._package_runtime_python(normalized_family),
+                "-m",
+                "voice_factory.package_runtime_runner",
+                "--family",
+                normalized_family,
+                "--package-dir",
+                str(package_dir),
+                "--module-name",
+                module_name,
+                "--output-dir",
+                str(preview_dir),
+                "--texts-path",
+                str(texts_path),
+            ]
+            if normalized_family == "sbv2":
+                command.extend(["--device", "cpu"])
+            elif normalized_family == "irodori":
+                command.extend(["--device", self._preview_device_for_compute_target(compute_target)])
+            preview_manifest = self._run_subprocess_json(command)
+        finally:
+            texts_path.unlink(missing_ok=True)
         preview_manifest["project_id"] = project_id
         preview_manifest["package_name"] = manifest["package_name"]
         preview_manifest["module_name"] = module_name
+        preview_manifest["reference_audios"] = manifest.get("reference_audios", [])
+        preview_manifest["default_reference_audio_name"] = manifest.get("default_reference_audio_name")
 
-        manifest_path = (
-            self._package_preview_manifest_path(project_id)
-            if normalized_family == "piper"
-            else self._sbv2_package_preview_manifest_path(project_id)
-        )
+        manifest_path = {
+            "piper": self._package_preview_manifest_path(project_id),
+            "sbv2": self._sbv2_package_preview_manifest_path(project_id),
+            "irodori": self._irodori_package_preview_manifest_path(project_id),
+        }[normalized_family]
         manifest_path.write_text(
             json.dumps(preview_manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -2505,6 +3253,7 @@ class VoiceFactoryService:
                     "",
                     "from __future__ import annotations",
                     "",
+                    "import os",
                     "import wave",
                     "from importlib import resources",
                     "from pathlib import Path",
@@ -2522,11 +3271,87 @@ class VoiceFactoryService:
                     "",
                     "_MODEL_DIR = resources.files(__package__) / 'assets' / 'model'",
                     f"_MODEL_FILE = '{model_path.name}'",
+                    "_JP_BERT_REPO = 'ku-nlp/deberta-v2-large-japanese-char-wwm'",
+                    "",
+                    "",
+                    "def _disable_transformers_safe_load_checks() -> None:",
+                    "    try:",
+                    "        import transformers.modeling_utils as _transformers_modeling_utils",
+                    "    except Exception:",
+                    "        _transformers_modeling_utils = None",
+                    "    else:",
+                    "        if hasattr(_transformers_modeling_utils, 'check_torch_load_is_safe'):",
+                    "            _transformers_modeling_utils.check_torch_load_is_safe = lambda *args, **kwargs: None",
+                    "    try:",
+                    "        import transformers.utils.import_utils as _transformers_import_utils",
+                    "    except Exception:",
+                    "        _transformers_import_utils = None",
+                    "    else:",
+                    "        if hasattr(_transformers_import_utils, 'check_torch_load_is_safe'):",
+                    "            _transformers_import_utils.check_torch_load_is_safe = lambda *args, **kwargs: None",
+                    "",
+                    "",
+                    "def _normalize_device(device: str) -> str:",
+                    "    import torch",
+                    "",
+                    "    normalized = (device or 'cpu').strip().lower()",
+                    "    if normalized in {'', 'auto'}:",
+                    "        return 'cuda' if torch.cuda.is_available() else 'cpu'",
+                    "    return normalized",
+                    "",
+                    "",
+                    "def _resolve_jp_bert_source() -> str:",
+                    "    candidates = [",
+                    "        os.environ.get('VOICE_FACTORY_SBV2_JP_BERT_MODEL'),",
+                    "        os.environ.get('VOICE_FACTORY_SBV2_BERT_MODEL'),",
+                    "    ]",
+                    "    style_bert_root = os.environ.get('VOICE_FACTORY_STYLE_BERT_VITS2_ROOT')",
+                    "    if style_bert_root:",
+                    "        candidates.append(",
+                    "            str(",
+                    "                Path(style_bert_root).expanduser().resolve()",
+                    "                / 'bert'",
+                    "                / 'deberta-v2-large-japanese-char-wwm'",
+                    "            )",
+                    "        )",
+                    "    for candidate in candidates:",
+                    "        if not candidate:",
+                    "            continue",
+                    "        candidate_path = Path(candidate).expanduser()",
+                    "        if candidate_path.exists():",
+                    "            return str(candidate_path.resolve())",
+                    "    try:",
+                    "        from style_bert_vits2.constants import DEFAULT_BERT_MODEL_PATHS",
+                    "    except Exception:",
+                    "        default_path = None",
+                    "    else:",
+                    "        default_path = DEFAULT_BERT_MODEL_PATHS.get(Languages.JP)",
+                    "    if default_path and default_path.exists():",
+                    "        return str(default_path.resolve())",
+                    "    return _JP_BERT_REPO",
+                    "",
+                    "",
+                    "def _prepare_runtime(device: str) -> str:",
+                    "    normalized_device = _normalize_device(device)",
+                    "    _disable_transformers_safe_load_checks()",
+                    "    jp_bert_source = _resolve_jp_bert_source()",
+                    "    from style_bert_vits2.nlp import bert_models",
+                    "",
+                    "    bert_models.load_tokenizer(",
+                    "        Languages.JP,",
+                    "        pretrained_model_name_or_path=jp_bert_source,",
+                    "    )",
+                    "    bert_models.load_model(",
+                    "        Languages.JP,",
+                    "        pretrained_model_name_or_path=jp_bert_source,",
+                    "    )",
+                    "    bert_models.transfer_model(Languages.JP, normalized_device)",
+                    "    return normalized_device",
                     "",
                     "",
                     "class PortableSBV2Voice:",
                     "    def __init__(self, device: str = 'cpu') -> None:",
-                    "        self.device = device",
+                    "        self.device = _prepare_runtime(device)",
                     "        self.model_dir = Path(str(_MODEL_DIR))",
                     "        self.model = TTSModel(",
                     "            model_path=self.model_dir / _MODEL_FILE,",
@@ -2632,6 +3457,7 @@ class VoiceFactoryService:
                     'requires-python = ">=3.10"',
                     "dependencies = [",
                     '  "numpy<2",',
+                    '  "transformers<5",',
                     '  "style-bert-vits2[torch] @ git+https://github.com/litagin02/Style-Bert-VITS2.git",',
                     "]",
                     "",
