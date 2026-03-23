@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ffmpeg \
+    git \
+    libsndfile1 \
+    ninja-build \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml app.py requirements.hf-space.txt LICENSE /app/
+COPY src /app/src
+
+RUN python -m pip install --upgrade pip setuptools wheel
+RUN python -m pip install -r requirements.hf-space.txt
+
+ENV GRADIO_SERVER_NAME=0.0.0.0 \
+    GRADIO_SERVER_PORT=7860 \
+    HF_HOME=/data/.cache/huggingface \
+    SPACE_DATA_DIR=/data \
+    TRANSFORMERS_CACHE=/data/.cache/huggingface/transformers \
+    VOICE_FACTORY_WORKSPACE_ROOT=/data/voice-factory-workspace \
+    XDG_CACHE_HOME=/data/.cache
+
+EXPOSE 7860
+
+CMD ["python", "app.py"]
