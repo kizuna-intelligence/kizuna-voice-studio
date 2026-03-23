@@ -90,10 +90,21 @@ def main() -> None:
     miotts_package_parser.add_argument("--project-id", required=True)
     miotts_package_parser.add_argument("--mio-base-url", default=DEFAULT_MIO_BASE_URL)
     miotts_package_parser.add_argument("--model-id")
+    miotts_package_parser.add_argument("--reference-audio", action="append", dest="reference_audios")
+
+    irodori_package_parser = subparsers.add_parser("build-installable-irodori-package")
+    irodori_package_parser.add_argument("--project-id", required=True)
+    irodori_package_parser.add_argument("--model-id")
+    irodori_package_parser.add_argument("--reference-audio", action="append", dest="reference_audios")
 
     miotts_preview_parser = subparsers.add_parser("build-miotts-package-preview")
     miotts_preview_parser.add_argument("--project-id", required=True)
     miotts_preview_parser.add_argument("--texts-json")
+
+    irodori_preview_parser = subparsers.add_parser("build-irodori-package-preview")
+    irodori_preview_parser.add_argument("--project-id", required=True)
+    irodori_preview_parser.add_argument("--texts-json")
+    irodori_preview_parser.add_argument("--compute-target", default="auto")
 
     start_job_parser = subparsers.add_parser("start-job")
     start_job_parser.add_argument("--job-type", required=True)
@@ -212,12 +223,33 @@ def main() -> None:
                 args.project_id,
                 mio_base_url=args.mio_base_url,
                 model_id=args.model_id,
+                reference_audio_paths=args.reference_audios,
+            )
+        )
+        return
+    if args.command == "build-installable-irodori-package":
+        _print(
+            service.build_installable_irodori_package(
+                args.project_id,
+                model_id=args.model_id,
+                reference_audio_paths=args.reference_audios,
             )
         )
         return
     if args.command == "build-miotts-package-preview":
         texts = json.loads(args.texts_json) if args.texts_json else None
         _print(service.build_miotts_package_previews(args.project_id, texts=texts))
+        return
+    if args.command == "build-irodori-package-preview":
+        texts = json.loads(args.texts_json) if args.texts_json else None
+        _print(
+            service.build_generated_package_previews(
+                args.project_id,
+                family="irodori",
+                texts=texts,
+                compute_target=args.compute_target,
+            )
+        )
         return
     if args.command == "start-job":
         _print(

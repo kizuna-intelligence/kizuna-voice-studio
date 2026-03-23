@@ -1,0 +1,7 @@
+build-essential
+cmake
+ffmpeg
+git
+libsndfile1
+ninja-build
+pkg-config

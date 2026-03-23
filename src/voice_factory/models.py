@@ -28,6 +28,7 @@ class VoiceProjectSpec:
     piper_base_checkpoint_filename: str = "model.ckpt"
     sbv2_pretrained_variant: str = "jp_extra"
     mio_reference_preset_id: str | None = None
+    irodori_model_label: str = "Aratako/Irodori-TTS-500M"
     prompt_categories: list[str] = field(
         default_factory=lambda: ["emotional", "neutral", "news", "academic"]
     )

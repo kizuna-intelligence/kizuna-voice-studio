@@ -75,6 +75,12 @@ class BuildSBV2PackageRequest(BaseModel):
 class BuildMioTtsPackageRequest(BaseModel):
     mio_base_url: str = service.default_mio_base_url()
     model_id: str | None = None
+    reference_audio_paths: list[str] | None = None
+
+
+class BuildIrodoriPackageRequest(BaseModel):
+    model_id: str | None = None
+    reference_audio_paths: list[str] | None = None
 
 
 class BuildMioTtsPackagePreviewRequest(BaseModel):
@@ -289,6 +295,47 @@ def get_miotts_package_preview_audio(project_id: str, sample_id: str) -> FileRes
     return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
 
 
+@app.get("/v1/projects/{project_id}/package/irodori")
+def get_irodori_package(project_id: str) -> dict:
+    payload = service.get_irodori_package_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Irodori-TTS package not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/irodori/download")
+def download_irodori_package(project_id: str) -> FileResponse:
+    manifest = service.get_irodori_package_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Irodori-TTS package not ready")
+    archive_path = Path(manifest["archive_path"])
+    if not archive_path.exists():
+        raise HTTPException(status_code=404, detail="Irodori-TTS package archive not found")
+    return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
+
+
+@app.get("/v1/projects/{project_id}/package/irodori/preview")
+def get_irodori_package_preview(project_id: str) -> dict:
+    payload = service.get_irodori_package_preview_manifest(project_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Irodori-TTS package preview is not ready")
+    return payload
+
+
+@app.get("/v1/projects/{project_id}/package/irodori/preview/{sample_id}/audio")
+def get_irodori_package_preview_audio(project_id: str, sample_id: str) -> FileResponse:
+    manifest = service.get_irodori_package_preview_manifest(project_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Irodori-TTS package preview is not ready")
+    sample = next((item for item in manifest["samples"] if item["id"] == sample_id), None)
+    if sample is None:
+        raise HTTPException(status_code=404, detail="Irodori-TTS preview sample not found")
+    audio_path = Path(sample["audio_path"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Irodori-TTS preview audio not found")
+    return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
+
+
 @app.post("/v1/projects/{project_id}/dataset")
 def build_dataset(project_id: str, payload: BuildDatasetRequest) -> dict:
     return service.build_dataset(
@@ -380,6 +427,7 @@ def build_miotts_package(project_id: str, payload: BuildMioTtsPackageRequest) ->
         project_id,
         mio_base_url=payload.mio_base_url,
         model_id=payload.model_id,
+        reference_audio_paths=payload.reference_audio_paths,
     )
 
 
@@ -388,6 +436,25 @@ def build_miotts_package_preview(project_id: str, payload: BuildMioTtsPackagePre
     return service.build_miotts_package_previews(
         project_id,
         texts=payload.texts,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/irodori")
+def build_irodori_package(project_id: str, payload: BuildIrodoriPackageRequest) -> dict:
+    return service.build_installable_irodori_package(
+        project_id,
+        model_id=payload.model_id,
+        reference_audio_paths=payload.reference_audio_paths,
+    )
+
+
+@app.post("/v1/projects/{project_id}/package/irodori/preview")
+def build_irodori_package_preview(project_id: str, payload: BuildPackagePreviewRequest) -> dict:
+    return service.build_generated_package_previews(
+        project_id,
+        family="irodori",
+        texts=payload.texts,
+        compute_target=payload.compute_target,
     )
 
 
